@@ -102,16 +102,35 @@ try {
 
     $raw = New-Object byte[] 10
     $read = [TouchPlusFactoryInterop]::eSPAEAWB_ReadFlash($raw, 10)
-    if (-not (Show-Ret 'eSPAEAWB_ReadFlash(10)' $read)) { throw 'Reading the Touch+ serial from flash failed.' }
+
+    # Historical Ractiv code ignores the ReadFlash return value and consumes the
+    # 10-byte buffer directly. On the recovered Etron DLL, the physical Touch+
+    # has been observed returning 10 for a 10-byte request. Negative values are
+    # documented Etron errors, so accept non-negative results and validate the
+    # payload itself below.
+    if ($read -lt 0) {
+        Write-Host ('{0,-34} RET={1}' -f 'eSPAEAWB_ReadFlash(10)', $read) -ForegroundColor Red
+        throw 'Reading the Touch+ serial from flash failed.'
+    }
+    $readState = if ($read -eq 10) { 'OK (10 bytes)' } elseif ($read -eq 0) { 'OK (legacy status 0)' } else { 'RET=' + $read + ' (payload will be validated)' }
+    Write-Host ('{0,-34} {1}' -f 'eSPAEAWB_ReadFlash(10)', $readState)
 
     $rawText = ($raw | ForEach-Object { $_.ToString() }) -join ','
+    $rawHex = ($raw | ForEach-Object { ('{0:X2}' -f $_) }) -join ' '
+
     # This deliberately mirrors Ractiv Camera::getSerialNumber(): decimal string
     # concatenation of each of the 10 flash bytes.
     $fullSerial = ($raw | ForEach-Object { $_.ToString() }) -join ''
 
     Write-Host ''
     Write-Host ('Raw flash bytes      : {0}' -f $rawText)
+    Write-Host ('Raw flash hex        : {0}' -f $rawHex)
     Write-Host ('Ractiv serial string : {0}' -f $fullSerial) -ForegroundColor Green
+
+    $allZero = (($raw | Where-Object { $_ -ne 0 }).Count -eq 0)
+    if ($allZero) {
+        throw 'Flash call returned without an Etron error, but the 10-byte payload is all zero.'
+    }
 
     $serialValid = ($fullSerial.Length -eq 10 -and $fullSerial.StartsWith('0101'))
     Write-Host ('Historical serial check (10 chars + 0101 prefix): {0}' -f $(if ($serialValid) { 'PASS' } else { 'WARN' }))
