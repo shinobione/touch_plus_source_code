@@ -3,7 +3,7 @@ cmake_policy(SET CMP0091 NEW)
 project(TouchPlusRevival LANGUAGES CXX)
 
 if(NOT WIN32)
-    message(FATAL_ERROR "Phase 0A currently targets Windows Media Foundation only.")
+    message(FATAL_ERROR "Phase 0 currently targets Windows only.")
 endif()
 
 add_executable(touchplus_probe
@@ -21,9 +21,22 @@ target_link_libraries(touchplus_probe PRIVATE
     windowscodecs
 )
 
+add_executable(touchplus_usb_probe
+    src/usb_probe.cpp
+)
+
+target_compile_features(touchplus_usb_probe PRIVATE cxx_std_20)
+target_compile_definitions(touchplus_usb_probe PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(touchplus_usb_probe PRIVATE
+    cfgmgr32
+    setupapi
+)
+
 if(MSVC)
-    set_property(TARGET touchplus_probe PROPERTY
-        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-    )
-    target_compile_options(touchplus_probe PRIVATE /W4 /permissive- /EHsc)
+    foreach(target touchplus_probe touchplus_usb_probe)
+        set_property(TARGET ${target} PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+        )
+        target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc)
+    endforeach()
 endif()
