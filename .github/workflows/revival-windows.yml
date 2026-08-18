@@ -41,8 +41,19 @@ jobs:
 
       - name: Locate probe binary
         if: steps.source.outputs.present == 'true'
+        id: binary
         shell: pwsh
         run: |
           $exe = Get-ChildItem -Path build/revival -Recurse -Filter touchplus_probe.exe | Select-Object -First 1
           if (-not $exe) { throw "touchplus_probe.exe was not produced" }
           Write-Host "Built: $($exe.FullName)"
+          "path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Upload standalone probe
+        if: steps.source.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchplus-probe-windows-x64
+          path: ${{ steps.binary.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
