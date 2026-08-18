@@ -61,6 +61,17 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${ETRON_DIR}/eSPAEAWBCtrl.lib"
     )
 
+    # Etron initializes COM internally on the caller thread. On the physical
+    # Touch+ this can leave the thread in a different apartment model before
+    # atomic_probe.cpp reaches its own CoInitializeEx call. Force-include a
+    # tiny compatibility shim that reuses that apartment on RPC_E_CHANGED_MODE
+    # while keeping CoUninitialize balanced when we own the COM init count.
+    if(MSVC)
+        target_compile_options(touchplus_atomic_probe PRIVATE
+            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/com_compat.h"
+        )
+    endif()
+
     foreach(etron_dll eSPAEAWBCtrl.dll eSPDI.dll EtLib.dll)
         add_custom_command(TARGET touchplus_atomic_probe POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
