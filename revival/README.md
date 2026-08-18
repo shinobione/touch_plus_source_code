@@ -15,6 +15,28 @@ The goal is **not** to recreate the abandoned 2015 desktop application. The Touc
 - Original target rate: up to `60 fps`
 - Hardware also exposes accelerometer, exposure/gain controls, GPIO/LED control and flash/serial access through vendor-specific controls.
 
+## Confirmed physical-device smoke — 2026-08-19
+
+The original physical Touch+ has now been exercised successfully on modern Windows.
+
+Confirmed on real hardware:
+
+- Windows enumerates the device as `USB\VID_1E4E&PID_0107`;
+- the composite parent is healthy and the child camera interface appears as `Touch+ Camera` / `MI_00`;
+- the recovered 32-bit Etron control stack initializes successfully;
+- `eSPAEAWB_EnumDevice` sees the Touch+ alongside another webcam;
+- `eSPAEAWB_SelectDevice` and `eSPAEAWB_SetSensorType(1)` succeed;
+- `eSPAEAWB_SWUnlock(0x0107)` returns success;
+- exposure/global-gain calls return successfully;
+- the accelerometer returns live values;
+- immediately after `SWUnlock`, Windows Camera displays a real live image from the Touch+.
+
+The live-image test is reproducible. If Windows Camera switches away to another webcam and then returns to Touch+, the Touch+ may fall back to a uniform gray stream. Re-running the software unlock and then immediately opening Touch+ Camera restores real video. This strongly indicates that the useful sensor state is volatile across stream/session transitions.
+
+**Consequence for the revival:** the production runtime must own the sequence atomically: vendor unlock/configuration first, then immediate video-open, without depending on another camera application.
+
+This closes the major hardware viability question: the recovered Touch+ is not a dead device. Its camera path, vendor control path and IMU are all alive.
+
 ## Architecture
 
 ```text
@@ -108,17 +130,37 @@ Then connect the Touch+ and run:
 
 `touchplus_probe.exe --list` is safe and only enumerates video devices. Running the camera probe without arguments attempts one real frame capture.
 
+## Phase 0B — vendor control probe
+
+`revival/tools/touchplus-unlock.ps1` uses the recovered Win32 Etron DLLs to validate the vendor-specific control plane independently from the video capture code.
+
+Confirmed on the physical device:
+
+- Etron initialization and device enumeration;
+- Touch+ selection;
+- OV7740/sensor type selection (`1`);
+- `SWUnlock(0x0107)`;
+- exposure and global-gain access;
+- accelerometer access;
+- real live video becomes available immediately after unlock.
+
+The optional `-LegacyInit` path reproduces the recovered Ractiv initializer: disable AE/AWB, LEDs on, 15 ms exposure, global gain 1.0 and color gains 2/1/2.
+
+## Phase 0C — atomic unlock + capture
+
+Next canonical implementation step:
+
+1. run the Etron unlock/control sequence;
+2. keep control of the same Touch+ session;
+3. immediately enumerate/open the video stream;
+4. select the native `1280x480` mode;
+5. capture and persist a frame;
+6. split and verify `640x480` left/right images;
+7. then keep the stream alive for a minimal stereo viewer.
+
+This phase must not depend on Windows Camera or another application that can close/reopen the device and lose the volatile unlocked/configured state.
+
 ## Planned phases
-
-### Phase 0B — vendor control probe
-
-Only after USB enumeration is stable enough to identify the device:
-
-- read serial/flash data;
-- read accelerometer values;
-- exposure/gain control;
-- LED/GPIO control;
-- document the minimum USB control transfers needed to replace the old Etron dependency where possible.
 
 ### Phase 1 — stereo foundation
 
