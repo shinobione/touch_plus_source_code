@@ -14,7 +14,7 @@ on:
       - ".github/workflows/revival-windows.yml"
 
 jobs:
-  build:
+  build-x64:
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -31,15 +31,15 @@ jobs:
             Write-Host "Revival source is not present on this baseline branch yet."
           }
 
-      - name: Configure
+      - name: Configure x64
         if: steps.source.outputs.present == 'true'
         run: cmake -S revival -B build/revival -A x64
 
-      - name: Build
+      - name: Build x64
         if: steps.source.outputs.present == 'true'
         run: cmake --build build/revival --config Release
 
-      - name: Locate probe binaries
+      - name: Locate x64 probe binaries
         if: steps.source.outputs.present == 'true'
         shell: pwsh
         run: |
@@ -50,7 +50,7 @@ jobs:
           Write-Host "Built camera probe: $($camera.FullName)"
           Write-Host "Built USB probe:    $($usb.FullName)"
 
-      - name: Upload standalone probes
+      - name: Upload standalone x64 probes
         if: steps.source.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -79,5 +79,60 @@ jobs:
         with:
           name: touchplus-phase0b-etron-unlock-kit
           path: build/revival-unlock-kit/*
+          if-no-files-found: error
+          retention-days: 30
+
+  build-atomic-x86:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect Revival source
+        id: source
+        shell: pwsh
+        run: |
+          if (Test-Path "revival/CMakeLists.txt") {
+            "present=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "present=false" >> $env:GITHUB_OUTPUT
+            Write-Host "Revival source is not present on this baseline branch yet."
+          }
+
+      - name: Configure Win32
+        if: steps.source.outputs.present == 'true'
+        run: cmake -S revival -B build/revival-x86 -A Win32
+
+      - name: Build Phase 0C atomic probe
+        if: steps.source.outputs.present == 'true'
+        run: cmake --build build/revival-x86 --config Release --target touchplus_atomic_probe
+
+      - name: Verify atomic kit
+        if: steps.source.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          $dir = "build/revival-x86/Release"
+          $required = @(
+            "touchplus_atomic_probe.exe",
+            "eSPAEAWBCtrl.dll",
+            "eSPDI.dll",
+            "EtLib.dll"
+          )
+          foreach ($name in $required) {
+            $path = Join-Path $dir $name
+            if (-not (Test-Path $path)) { throw "Missing Phase 0C artifact: $path" }
+          }
+          Get-ChildItem $dir | Where-Object { $_.Name -in $required } | Format-Table Name,Length
+
+      - name: Upload Phase 0C atomic probe kit
+        if: steps.source.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchplus-phase0c-atomic-windows-x86
+          path: |
+            build/revival-x86/Release/touchplus_atomic_probe.exe
+            build/revival-x86/Release/eSPAEAWBCtrl.dll
+            build/revival-x86/Release/eSPDI.dll
+            build/revival-x86/Release/EtLib.dll
           if-no-files-found: error
           retention-days: 30
