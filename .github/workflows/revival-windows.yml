@@ -39,21 +39,24 @@ jobs:
         if: steps.source.outputs.present == 'true'
         run: cmake --build build/revival --config Release
 
-      - name: Locate probe binary
+      - name: Locate probe binaries
         if: steps.source.outputs.present == 'true'
-        id: binary
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Path build/revival -Recurse -Filter touchplus_probe.exe | Select-Object -First 1
-          if (-not $exe) { throw "touchplus_probe.exe was not produced" }
-          Write-Host "Built: $($exe.FullName)"
-          "path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          $camera = Get-ChildItem -Path build/revival -Recurse -Filter touchplus_probe.exe | Select-Object -First 1
+          $usb = Get-ChildItem -Path build/revival -Recurse -Filter touchplus_usb_probe.exe | Select-Object -First 1
+          if (-not $camera) { throw "touchplus_probe.exe was not produced" }
+          if (-not $usb) { throw "touchplus_usb_probe.exe was not produced" }
+          Write-Host "Built camera probe: $($camera.FullName)"
+          Write-Host "Built USB probe:    $($usb.FullName)"
 
-      - name: Upload standalone probe
+      - name: Upload standalone probes
         if: steps.source.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: touchplus-probe-windows-x64
-          path: ${{ steps.binary.outputs.path }}
+          name: touchplus-probes-windows-x64
+          path: |
+            build/revival/**/touchplus_probe.exe
+            build/revival/**/touchplus_usb_probe.exe
           if-no-files-found: error
           retention-days: 30
