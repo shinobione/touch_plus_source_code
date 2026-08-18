@@ -146,7 +146,8 @@ jobs:
           $required = @(
             "touchplus_stereo_viewer.exe",
             "touchplus_timing_probe.exe",
-            "touchplus_directshow_timing_probe.exe"
+            "touchplus_directshow_timing_probe.exe",
+            "touchplus_directshow_legacy_timing_probe.exe"
           )
           $missing = @($required | Where-Object { -not (Test-Path (Join-Path $dir $_)) })
           if ($missing.Count -eq 0) {
@@ -165,6 +166,7 @@ jobs:
             build/revival-x86/Release/touchplus_stereo_viewer.exe
             build/revival-x86/Release/touchplus_timing_probe.exe
             build/revival-x86/Release/touchplus_directshow_timing_probe.exe
+            build/revival-x86/Release/touchplus_directshow_legacy_timing_probe.exe
             revival/tools/touchplus-unlock.ps1
             build/revival-x86/Release/eSPAEAWBCtrl.dll
             build/revival-x86/Release/eSPDI.dll
