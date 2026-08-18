@@ -1,0 +1,34 @@
+name: Revival Windows Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "revival/**"
+    paths:
+      - "revival/**"
+      - ".github/workflows/revival-windows.yml"
+  pull_request:
+    paths:
+      - "revival/**"
+      - ".github/workflows/revival-windows.yml"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S revival -B build/revival -A x64
+
+      - name: Build
+        run: cmake --build build/revival --config Release
+
+      - name: Locate probe binary
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path build/revival -Recurse -Filter touchplus_probe.exe | Select-Object -First 1
+          if (-not $exe) { throw "touchplus_probe.exe was not produced" }
+          Write-Host "Built: $($exe.FullName)"
