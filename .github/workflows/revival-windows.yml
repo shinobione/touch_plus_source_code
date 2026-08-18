@@ -165,6 +165,7 @@ jobs:
             build/revival-x86/Release/touchplus_stereo_viewer.exe
             build/revival-x86/Release/touchplus_timing_probe.exe
             build/revival-x86/Release/touchplus_directshow_timing_probe.exe
+            revival/tools/touchplus-unlock.ps1
             build/revival-x86/Release/eSPAEAWBCtrl.dll
             build/revival-x86/Release/eSPDI.dll
             build/revival-x86/Release/EtLib.dll
