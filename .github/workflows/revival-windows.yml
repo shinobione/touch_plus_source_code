@@ -142,7 +142,9 @@ jobs:
         id: viewer
         shell: pwsh
         run: |
-          if (Test-Path "build/revival-x86/Release/touchplus_stereo_viewer.exe") {
+          $dir = "build/revival-x86/Release"
+          if ((Test-Path "$dir/touchplus_stereo_viewer.exe") -and
+              (Test-Path "$dir/touchplus_timing_probe.exe")) {
             "present=true" >> $env:GITHUB_OUTPUT
           } else {
             "present=false" >> $env:GITHUB_OUTPUT
@@ -155,6 +157,7 @@ jobs:
           name: touchplus-phase1-stereo-viewer-windows-x86
           path: |
             build/revival-x86/Release/touchplus_stereo_viewer.exe
+            build/revival-x86/Release/touchplus_timing_probe.exe
             build/revival-x86/Release/eSPAEAWBCtrl.dll
             build/revival-x86/Release/eSPDI.dll
             build/revival-x86/Release/EtLib.dll
