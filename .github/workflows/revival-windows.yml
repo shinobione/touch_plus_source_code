@@ -60,3 +60,24 @@ jobs:
             build/revival/**/touchplus_usb_probe.exe
           if-no-files-found: error
           retention-days: 30
+
+      - name: Prepare Phase 0B Etron unlock kit
+        if: steps.source.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          $kit = "build/revival-unlock-kit"
+          New-Item -ItemType Directory -Force -Path $kit | Out-Null
+          Copy-Item "revival/tools/touchplus-unlock.ps1" "$kit/touchplus-unlock.ps1"
+          Copy-Item "build/eSPAEAWBCtrl.dll" "$kit/eSPAEAWBCtrl.dll"
+          Copy-Item "build/eSPDI.dll" "$kit/eSPDI.dll"
+          Copy-Item "build/EtLib.dll" "$kit/EtLib.dll"
+          Get-ChildItem $kit | Format-Table Name,Length
+
+      - name: Upload Phase 0B Etron unlock kit
+        if: steps.source.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchplus-phase0b-etron-unlock-kit
+          path: build/revival-unlock-kit/*
+          if-no-files-found: error
+          retention-days: 30
