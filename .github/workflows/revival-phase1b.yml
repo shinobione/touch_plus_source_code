@@ -1,0 +1,36 @@
+name: Revival Phase 1B Calibration Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "revival/phase1b-factory-calibration"
+    paths:
+      - "revival/tools/touchplus-factory-calibration-probe.ps1"
+      - ".github/workflows/revival-phase1b.yml"
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare factory calibration probe kit
+        shell: pwsh
+        run: |
+          $kit = "build/phase1b-factory-calibration-probe"
+          New-Item -ItemType Directory -Force -Path $kit | Out-Null
+          Copy-Item "revival/tools/touchplus-factory-calibration-probe.ps1" "$kit/touchplus-factory-calibration-probe.ps1"
+          Copy-Item "build/eSPAEAWBCtrl.dll" "$kit/eSPAEAWBCtrl.dll"
+          Copy-Item "build/eSPDI.dll" "$kit/eSPDI.dll"
+          Copy-Item "build/EtLib.dll" "$kit/EtLib.dll"
+          Get-ChildItem $kit | Format-Table Name,Length
+
+      - name: Upload Phase 1B factory calibration probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchplus-phase1b-factory-calibration-probe
+          path: build/phase1b-factory-calibration-probe/*
+          if-no-files-found: error
+          retention-days: 30
