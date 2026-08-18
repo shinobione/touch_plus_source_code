@@ -12,6 +12,7 @@ add_executable(touchplus_probe
 target_compile_features(touchplus_probe PRIVATE cxx_std_20)
 target_compile_definitions(touchplus_probe PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(touchplus_probe PRIVATE
+    mf
     mfplat
     mfreadwrite
     mfuuid
