@@ -38,9 +38,34 @@ Touch+ hardware
 
 The legacy Ractiv algorithms remain valuable as documentation and as a fallback reference, but new code should depend on them only where they provide hardware-specific knowledge that cannot be replaced cleanly.
 
+## Phase 0-preflight — raw Windows USB/PnP probe
+
+A device that fails USB enumeration never reaches Media Foundation and therefore cannot appear in the camera probe. `touchplus_usb_probe.exe` inspects present USB devnodes through SetupAPI/Configuration Manager instead of the video stack.
+
+It reports:
+
+- any visible `VID_1E4E&PID_0107` Touch+ identity;
+- USB descriptor-failure / `USB\\UNKNOWN` style nodes;
+- Windows PnP problem codes including Code 43;
+- instance ID, hardware IDs, location, service and parent device when available.
+
+Run:
+
+```powershell
+.\build\revival\Release\touchplus_usb_probe.exe
+```
+
+Use `--all` only when the filtered output is not enough:
+
+```powershell
+.\build\revival\Release\touchplus_usb_probe.exe --all
+```
+
+For an unidentified Code 43 device, perform a correlation test: run the probe with the Touch+ unplugged, then plug it in and run again. If the `[USB-FAIL]` node appears/disappears with the sensor, we have identified the physical Touch+ even though Windows cannot yet read its VID/PID.
+
 ## Phase 0A — Windows UVC hardware probe
 
-The first executable deliberately uses **only Windows Media Foundation and WIC**. It does not depend on OpenCV 2.4, the old Ractiv UI, SFML, or the Etron DLLs.
+The camera executable deliberately uses **only Windows Media Foundation and WIC**. It does not depend on OpenCV 2.4, the old Ractiv UI, SFML, or the Etron DLLs.
 
 It must prove four things on the real device:
 
@@ -76,17 +101,18 @@ cmake --build build/revival --config Release
 Then connect the Touch+ and run:
 
 ```powershell
+.\build\revival\Release\touchplus_usb_probe.exe
 .\build\revival\Release\touchplus_probe.exe --list
 .\build\revival\Release\touchplus_probe.exe
 ```
 
-`--list` is safe and only enumerates video devices. Running without arguments attempts one real frame capture.
+`touchplus_probe.exe --list` is safe and only enumerates video devices. Running the camera probe without arguments attempts one real frame capture.
 
 ## Planned phases
 
 ### Phase 0B — vendor control probe
 
-Only after 0A passes:
+Only after USB enumeration is stable enough to identify the device:
 
 - read serial/flash data;
 - read accelerometer values;
