@@ -60,8 +60,11 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${ETRON_DIR}/eSPAEAWBCtrl.lib"
     )
 
+    # Phase 1A RT deliberately avoids MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING.
+    # Media Foundation decodes MJPEG to YUY2; the viewer performs its own tiny
+    # YUY2->BGRA conversion and keeps capture on a thread separate from GDI.
     add_executable(touchplus_stereo_viewer
-        src/stereo_viewer.cpp
+        src/stereo_viewer_rt.cpp
     )
     list(APPEND REVIVAL_TARGETS touchplus_stereo_viewer)
     target_compile_features(touchplus_stereo_viewer PRIVATE cxx_std_20)
