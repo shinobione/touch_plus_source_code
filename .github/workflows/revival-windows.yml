@@ -82,7 +82,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  build-atomic-x86:
+  build-win32:
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -103,11 +103,11 @@ jobs:
         if: steps.source.outputs.present == 'true'
         run: cmake -S revival -B build/revival-x86 -A Win32
 
-      - name: Build Phase 0C atomic probe
+      - name: Build Win32 Revival targets
         if: steps.source.outputs.present == 'true'
-        run: cmake --build build/revival-x86 --config Release --target touchplus_atomic_probe
+        run: cmake --build build/revival-x86 --config Release
 
-      - name: Verify atomic kit
+      - name: Verify Phase 0C atomic kit
         if: steps.source.outputs.present == 'true'
         shell: pwsh
         run: |
@@ -131,6 +131,30 @@ jobs:
           name: touchplus-phase0c-atomic-windows-x86
           path: |
             build/revival-x86/Release/touchplus_atomic_probe.exe
+            build/revival-x86/Release/eSPAEAWBCtrl.dll
+            build/revival-x86/Release/eSPDI.dll
+            build/revival-x86/Release/EtLib.dll
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Detect Phase 1 stereo viewer
+        if: steps.source.outputs.present == 'true'
+        id: viewer
+        shell: pwsh
+        run: |
+          if (Test-Path "build/revival-x86/Release/touchplus_stereo_viewer.exe") {
+            "present=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "present=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Upload Phase 1 stereo viewer kit
+        if: steps.viewer.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchplus-phase1-stereo-viewer-windows-x86
+          path: |
+            build/revival-x86/Release/touchplus_stereo_viewer.exe
             build/revival-x86/Release/eSPAEAWBCtrl.dll
             build/revival-x86/Release/eSPDI.dll
             build/revival-x86/Release/EtLib.dll
