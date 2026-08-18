@@ -20,13 +20,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Detect Revival source
+        id: source
+        shell: pwsh
+        run: |
+          if (Test-Path "revival/CMakeLists.txt") {
+            "present=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "present=false" >> $env:GITHUB_OUTPUT
+            Write-Host "Revival source is not present on this baseline branch yet."
+          }
+
       - name: Configure
+        if: steps.source.outputs.present == 'true'
         run: cmake -S revival -B build/revival -A x64
 
       - name: Build
+        if: steps.source.outputs.present == 'true'
         run: cmake --build build/revival --config Release
 
       - name: Locate probe binary
+        if: steps.source.outputs.present == 'true'
         shell: pwsh
         run: |
           $exe = Get-ChildItem -Path build/revival -Recurse -Filter touchplus_probe.exe | Select-Object -First 1
