@@ -45,6 +45,12 @@ bool g_have_frame = false;
 bool g_running = true;
 std::wstring g_status = L"Waiting for Touch+ frames...";
 
+HDC g_back_dc = nullptr;
+HBITMAP g_back_bitmap = nullptr;
+HGDIOBJ g_back_old_bitmap = nullptr;
+int g_back_width = 0;
+int g_back_height = 0;
+
 void check_hr(HRESULT hr, const char* operation) {
     if (FAILED(hr)) {
         std::ostringstream oss;
@@ -101,6 +107,62 @@ std::string fourcc_from_guid(const GUID& guid) {
         }
     }
     return std::string(chars);
+}
+
+void release_backbuffer() {
+    if (g_back_dc != nullptr) {
+        if (g_back_old_bitmap != nullptr) {
+            SelectObject(g_back_dc, g_back_old_bitmap);
+        }
+        if (g_back_bitmap != nullptr) {
+            DeleteObject(g_back_bitmap);
+        }
+        DeleteDC(g_back_dc);
+    }
+
+    g_back_dc = nullptr;
+    g_back_bitmap = nullptr;
+    g_back_old_bitmap = nullptr;
+    g_back_width = 0;
+    g_back_height = 0;
+}
+
+bool ensure_backbuffer(HDC reference_dc, int width, int height) {
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+    if (g_back_dc != nullptr && g_back_bitmap != nullptr &&
+        g_back_width == width && g_back_height == height) {
+        return true;
+    }
+
+    release_backbuffer();
+
+    g_back_dc = CreateCompatibleDC(reference_dc);
+    if (g_back_dc == nullptr) {
+        return false;
+    }
+
+    g_back_bitmap = CreateCompatibleBitmap(reference_dc, width, height);
+    if (g_back_bitmap == nullptr) {
+        DeleteDC(g_back_dc);
+        g_back_dc = nullptr;
+        return false;
+    }
+
+    g_back_old_bitmap = SelectObject(g_back_dc, g_back_bitmap);
+    if (g_back_old_bitmap == nullptr || g_back_old_bitmap == HGDI_ERROR) {
+        DeleteObject(g_back_bitmap);
+        DeleteDC(g_back_dc);
+        g_back_bitmap = nullptr;
+        g_back_dc = nullptr;
+        g_back_old_bitmap = nullptr;
+        return false;
+    }
+
+    g_back_width = width;
+    g_back_height = height;
+    return true;
 }
 
 struct ComRuntime {
@@ -246,6 +308,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
         DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
+        release_backbuffer();
         g_running = false;
         PostQuitMessage(0);
         return 0;
@@ -263,13 +326,21 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
         HDC dc = BeginPaint(hwnd, &ps);
         RECT rc{};
         GetClientRect(hwnd, &rc);
-        FillRect(dc, &rc, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
 
         const int client_width = static_cast<int>(rc.right - rc.left);
         const int client_height = static_cast<int>(rc.bottom - rc.top);
         const int status_height = 34;
         const int view_height = std::max(1, client_height - status_height);
         const int half_width = std::max(1, client_width / 2);
+
+        if (!ensure_backbuffer(dc, client_width, client_height)) {
+            FillRect(dc, &rc, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+
+        RECT back_rect{0, 0, client_width, client_height};
+        FillRect(g_back_dc, &back_rect, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
 
         if (g_have_frame) {
             BITMAPINFO bmi{};
@@ -280,36 +351,46 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             bmi.bmiHeader.biBitCount = 32;
             bmi.bmiHeader.biCompression = BI_RGB;
 
-            SetStretchBltMode(dc, HALFTONE);
-            StretchDIBits(dc,
+            // The live path values latency over high-quality scaling. More
+            // importantly, all drawing now lands in the off-screen backbuffer;
+            // the visible window receives one final BitBlt instead of seeing
+            // the intermediate black clear that caused the Phase 1A flicker.
+            SetStretchBltMode(g_back_dc, COLORONCOLOR);
+            StretchDIBits(g_back_dc,
                           0, 0, half_width, view_height,
                           0, 0, kEyeWidth, kEyeHeight,
                           g_frame.data(), &bmi, DIB_RGB_COLORS, SRCCOPY);
-            StretchDIBits(dc,
+            StretchDIBits(g_back_dc,
                           half_width, 0, client_width - half_width, view_height,
                           kEyeWidth, 0, kEyeWidth, kEyeHeight,
                           g_frame.data(), &bmi, DIB_RGB_COLORS, SRCCOPY);
         }
 
         HPEN divider = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
-        HGDIOBJ old_pen = SelectObject(dc, divider);
-        MoveToEx(dc, half_width, 0, nullptr);
-        LineTo(dc, half_width, view_height);
-        SelectObject(dc, old_pen);
+        HGDIOBJ old_pen = SelectObject(g_back_dc, divider);
+        MoveToEx(g_back_dc, half_width, 0, nullptr);
+        LineTo(g_back_dc, half_width, view_height);
+        SelectObject(g_back_dc, old_pen);
         DeleteObject(divider);
 
-        SetBkMode(dc, TRANSPARENT);
-        SetTextColor(dc, RGB(255, 255, 255));
-        TextOutW(dc, 12, 10, L"LEFT", 4);
-        TextOutW(dc, half_width + 12, 10, L"RIGHT", 5);
+        SetBkMode(g_back_dc, TRANSPARENT);
+        SetTextColor(g_back_dc, RGB(255, 255, 255));
+        TextOutW(g_back_dc, 12, 10, L"LEFT", 4);
+        TextOutW(g_back_dc, half_width + 12, 10, L"RIGHT", 5);
 
-        SetTextColor(dc, RGB(180, 220, 255));
-        TextOutW(dc, 12, view_height + 8,
+        SetTextColor(g_back_dc, RGB(180, 220, 255));
+        TextOutW(g_back_dc, 12, view_height + 8,
                  g_status.c_str(), static_cast<int>(g_status.size()));
-        SetTextColor(dc, RGB(190, 190, 190));
+        SetTextColor(g_back_dc, RGB(190, 190, 190));
         const wchar_t* help = L"ESC/Q: quit";
-        TextOutW(dc, std::max(12, client_width - 120), view_height + 8,
+        TextOutW(g_back_dc, std::max(12, client_width - 120), view_height + 8,
                  help, static_cast<int>(wcslen(help)));
+
+        BitBlt(dc,
+               0, 0, client_width, client_height,
+               g_back_dc,
+               0, 0,
+               SRCCOPY);
 
         EndPaint(hwnd, &ps);
         return 0;
