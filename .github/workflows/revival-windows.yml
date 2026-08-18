@@ -143,11 +143,17 @@ jobs:
         shell: pwsh
         run: |
           $dir = "build/revival-x86/Release"
-          if ((Test-Path "$dir/touchplus_stereo_viewer.exe") -and
-              (Test-Path "$dir/touchplus_timing_probe.exe")) {
+          $required = @(
+            "touchplus_stereo_viewer.exe",
+            "touchplus_timing_probe.exe",
+            "touchplus_directshow_timing_probe.exe"
+          )
+          $missing = @($required | Where-Object { -not (Test-Path (Join-Path $dir $_)) })
+          if ($missing.Count -eq 0) {
             "present=true" >> $env:GITHUB_OUTPUT
           } else {
             "present=false" >> $env:GITHUB_OUTPUT
+            Write-Host "Missing Phase 1 binaries: $($missing -join ', ')"
           }
 
       - name: Upload Phase 1 stereo viewer kit
@@ -158,6 +164,7 @@ jobs:
           path: |
             build/revival-x86/Release/touchplus_stereo_viewer.exe
             build/revival-x86/Release/touchplus_timing_probe.exe
+            build/revival-x86/Release/touchplus_directshow_timing_probe.exe
             build/revival-x86/Release/eSPAEAWBCtrl.dll
             build/revival-x86/Release/eSPDI.dll
             build/revival-x86/Release/EtLib.dll
