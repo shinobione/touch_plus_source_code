@@ -6,10 +6,12 @@ if(NOT WIN32)
     message(FATAL_ERROR "Phase 0 currently targets Windows only.")
 endif()
 
+set(REVIVAL_TARGETS)
+
 add_executable(touchplus_probe
     src/main.cpp
 )
-
+list(APPEND REVIVAL_TARGETS touchplus_probe)
 target_compile_features(touchplus_probe PRIVATE cxx_std_20)
 target_compile_definitions(touchplus_probe PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(touchplus_probe PRIVATE
@@ -24,7 +26,7 @@ target_link_libraries(touchplus_probe PRIVATE
 add_executable(touchplus_usb_probe
     src/usb_probe.cpp
 )
-
+list(APPEND REVIVAL_TARGETS touchplus_usb_probe)
 target_compile_features(touchplus_usb_probe PRIVATE cxx_std_20)
 target_compile_definitions(touchplus_usb_probe PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(touchplus_usb_probe PRIVATE
@@ -32,8 +34,45 @@ target_link_libraries(touchplus_usb_probe PRIVATE
     setupapi
 )
 
+# The recovered Etron control SDK is 32-bit only. Phase 0C therefore gets a
+# dedicated Win32 build so vendor unlock and Media Foundation capture happen
+# atomically inside one process.
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    set(ETRON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../dependencies/Windows/Etron")
+    set(LEGACY_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../build")
+
+    add_executable(touchplus_atomic_probe
+        src/atomic_probe.cpp
+    )
+    list(APPEND REVIVAL_TARGETS touchplus_atomic_probe)
+    target_compile_features(touchplus_atomic_probe PRIVATE cxx_std_20)
+    target_compile_definitions(touchplus_atomic_probe PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+    )
+    target_include_directories(touchplus_atomic_probe PRIVATE "${ETRON_DIR}")
+    target_link_libraries(touchplus_atomic_probe PRIVATE
+        mf
+        mfplat
+        mfreadwrite
+        mfuuid
+        ole32
+        windowscodecs
+        "${ETRON_DIR}/eSPDI.lib"
+        "${ETRON_DIR}/eSPAEAWBCtrl.lib"
+    )
+
+    foreach(etron_dll eSPAEAWBCtrl.dll eSPDI.dll EtLib.dll)
+        add_custom_command(TARGET touchplus_atomic_probe POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${LEGACY_BUILD_DIR}/${etron_dll}"
+                "$<TARGET_FILE_DIR:touchplus_atomic_probe>/${etron_dll}"
+            VERBATIM
+        )
+    endforeach()
+endif()
+
 if(MSVC)
-    foreach(target touchplus_probe touchplus_usb_probe)
+    foreach(target IN LISTS REVIVAL_TARGETS)
         set_property(TARGET ${target} PROPERTY
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
         )
