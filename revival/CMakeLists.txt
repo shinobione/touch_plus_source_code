@@ -105,6 +105,25 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${ETRON_DIR}/eSPAEAWBCtrl.lib"
     )
 
+    # Legacy-path timing probe: replay the exact DirectShow IAMStreamConfig
+    # negotiation Ractiv used, including AvgTimePerFrame = 1e7 / 60.
+    add_executable(touchplus_directshow_timing_probe
+        src/directshow_timing_probe.cpp
+    )
+    list(APPEND REVIVAL_TARGETS touchplus_directshow_timing_probe)
+    target_compile_features(touchplus_directshow_timing_probe PRIVATE cxx_std_20)
+    target_compile_definitions(touchplus_directshow_timing_probe PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+    )
+    target_include_directories(touchplus_directshow_timing_probe PRIVATE "${ETRON_DIR}")
+    target_link_libraries(touchplus_directshow_timing_probe PRIVATE
+        strmiids
+        ole32
+        oleaut32
+        "${ETRON_DIR}/eSPDI.lib"
+        "${ETRON_DIR}/eSPAEAWBCtrl.lib"
+    )
+
     # Etron initializes COM internally on the caller thread. On the physical
     # Touch+ this can leave the thread in a different apartment model before
     # atomic_probe.cpp reaches its own CoInitializeEx call. Force-include a
@@ -116,7 +135,11 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         )
     endif()
 
-    foreach(etron_target touchplus_atomic_probe touchplus_stereo_viewer touchplus_timing_probe)
+    foreach(etron_target
+            touchplus_atomic_probe
+            touchplus_stereo_viewer
+            touchplus_timing_probe
+            touchplus_directshow_timing_probe)
         foreach(etron_dll eSPAEAWBCtrl.dll eSPDI.dll EtLib.dll)
             add_custom_command(TARGET ${etron_target} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
