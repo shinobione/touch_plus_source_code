@@ -74,7 +74,6 @@ Write-Host '  - Avoid blur, glare, repeated near-identical poses and extreme edg
 Write-Host '  - Recommended: 18-25 accepted pairs.'
 Write-Host ''
 
-# Continue after existing accepted pairs if the script is restarted.
 $existing = @(Get-ChildItem $rawDir -Filter 'pair-*-left.png' -ErrorAction SilentlyContinue)
 $accepted = $existing.Count
 if ($accepted -gt 0) {
@@ -142,7 +141,8 @@ function Capture-OnePair([int]$index) {
     return [pscustomobject]@{ Full=$dstFull; Left=$dstLeft; Right=$dstRight; Stem=$stem }
 }
 
-while ($accepted -lt $Pairs) {
+$finishEarly = $false
+while ($accepted -lt $Pairs -and -not $finishEarly) {
     $next = $accepted + 1
     Write-Host ''
     Write-Host ('POSE {0}/{1}' -f $next, $Pairs) -ForegroundColor Green
@@ -163,14 +163,16 @@ while ($accepted -lt $Pairs) {
         continue
     }
 
-    while ($true) {
+    $reviewDone = $false
+    while (-not $reviewDone) {
         Write-Host ('Saved {0}' -f $pair.Stem) -ForegroundColor Green
         $review = Read-Host '[ENTER]=accept   R=retake   O=open preview   Q=accept + finish'
         if ($review -match '^[Rr]$') {
             Remove-Item $pair.Full,$pair.Left,$pair.Right -Force -ErrorAction SilentlyContinue
             Remove-Item (Join-Path $rawDir ($pair.Stem + '.json')) -Force -ErrorAction SilentlyContinue
             Write-Host 'Pair rejected; retake it with a cleaner/different pose.' -ForegroundColor Yellow
-            break
+            $reviewDone = $true
+            continue
         }
         if ($review -match '^[Oo]$') {
             try { Start-Process $pair.Full | Out-Null } catch { Write-Warning $_.Exception.Message }
@@ -178,8 +180,8 @@ while ($accepted -lt $Pairs) {
         }
 
         $accepted++
-        if ($review -match '^[Qq]$') { $accepted = [Math]::Min($accepted, $Pairs); break 2 }
-        break
+        if ($review -match '^[Qq]$') { $finishEarly = $true }
+        $reviewDone = $true
     }
 }
 
