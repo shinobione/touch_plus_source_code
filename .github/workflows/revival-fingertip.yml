@@ -1,0 +1,95 @@
+name: Revival Fingertip 3D
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "revival/**"
+    paths:
+      - "revival/**"
+      - ".github/workflows/revival-fingertip.yml"
+  pull_request:
+    paths:
+      - "revival/**"
+      - ".github/workflows/revival-fingertip.yml"
+
+jobs:
+  fingertip-math-x64:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure tracker x64
+        run: cmake -S revival/phase2b_test -B build/fingertip-x64 -A x64
+
+      - name: Build tracker self-test x64
+        run: cmake --build build/fingertip-x64 --config Release
+
+      - name: Run tracker self-test x64
+        shell: pwsh
+        run: |
+          & "build/fingertip-x64/Release/touchplus_fingertip_tracker_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B tracker x64 self-test failed: $LASTEXITCODE" }
+
+  phase2b-win32:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure tracker Win32
+        run: cmake -S revival/phase2b_test -B build/fingertip-x86 -A Win32
+
+      - name: Build tracker self-test Win32
+        run: cmake --build build/fingertip-x86 --config Release
+
+      - name: Run tracker self-test Win32
+        shell: pwsh
+        run: |
+          & "build/fingertip-x86/Release/touchplus_fingertip_tracker_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B tracker Win32 self-test failed: $LASTEXITCODE" }
+
+      - name: Configure Revival Win32
+        run: cmake -S revival -B build/revival-x86 -A Win32
+
+      - name: Build Revival Win32
+        run: cmake --build build/revival-x86 --config Release
+
+      - name: Run Phase 2A surface regression
+        shell: pwsh
+        run: |
+          & "build/revival-x86/Release/touchplus_surface_frame_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2A surface self-test regressed: $LASTEXITCODE" }
+
+      - name: Run Phase 1C calibration/Q regression
+        shell: pwsh
+        run: |
+          $exe = "build/revival-x86/Release/touchplus_depth_viewer.exe"
+          $cal = "revival/calibration/candidates/0101007379.json"
+          if (-not (Test-Path $exe)) { throw "touchplus_depth_viewer.exe was not produced" }
+          & $exe --self-test $cal
+          if ($LASTEXITCODE -ne 0) { throw "Phase 1C depth self-test regressed: $LASTEXITCODE" }
+
+      - name: Prepare Phase 2B fingertip kit
+        shell: pwsh
+        run: |
+          $src = "build/revival-x86/Release"
+          $kit = "build/touchplus-phase2b-fingertip-3d"
+          New-Item -ItemType Directory -Force -Path $kit | Out-Null
+          New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
+          Copy-Item "$src/touchplus_depth_viewer.exe" "$kit/touchplus_depth_viewer.exe"
+          Copy-Item "$src/eSPAEAWBCtrl.dll" "$kit/eSPAEAWBCtrl.dll"
+          Copy-Item "$src/eSPDI.dll" "$kit/eSPDI.dll"
+          Copy-Item "$src/EtLib.dll" "$kit/EtLib.dll"
+          Copy-Item "revival/calibration/candidates/0101007379.json" "$kit/calibration/0101007379.json"
+          Copy-Item "revival/notes/phase2b-fingertip-3d.md" "$kit/README-fingertip-3d.md"
+          Get-ChildItem -Recurse $kit | Select-Object FullName,Length | Format-Table -AutoSize
+
+      - name: Upload Phase 2B fingertip kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchplus-phase2b-fingertip-3d-windows-x86
+          path: build/touchplus-phase2b-fingertip-3d/**
+          if-no-files-found: error
+          retention-days: 30
