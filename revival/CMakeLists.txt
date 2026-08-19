@@ -117,6 +117,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         src/depth_viewer.cpp
         src/depth_math.h
         src/depth_point_robust.h
+        src/depth_probe_lock.h
     )
     list(APPEND REVIVAL_TARGETS touchplus_depth_viewer)
     target_compile_features(touchplus_depth_viewer PRIVATE cxx_std_20)
@@ -127,13 +128,15 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${ETRON_DIR}"
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
-    # Keep depth_math.h as the dependency-free reference implementation, but
-    # force-include a runtime wrapper that renames the permissive point matcher
-    # and replaces it with texture/NCC/LR-consistency/local-consensus/temporal
-    # validation. This isolates the physical-smoke fix to the live viewer.
+    # Keep depth_math.h as the dependency-free reference implementation. The
+    # first forced header replaces the permissive cursor matcher with the
+    # hardened texture/NCC/LR-consistency/local-consensus/temporal matcher. The
+    # second adds a P-key locked diagnostic wrapper reporting valid %, median Z,
+    # MAD and confidence without changing calibration/Q or normal live behavior.
     if(MSVC)
         target_compile_options(touchplus_depth_viewer PRIVATE
             "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_point_robust.h"
+            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_probe_lock.h"
         )
     endif()
     target_link_libraries(touchplus_depth_viewer PRIVATE
