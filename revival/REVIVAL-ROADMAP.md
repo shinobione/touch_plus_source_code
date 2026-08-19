@@ -1,6 +1,6 @@
 # TouchPlus Revival — canonical roadmap / handoff
 
-Last updated: **2026-08-19 18:10 CEST**
+Last updated: **2026-08-19 20:23 CEST**
 
 This file is the canonical resume point for TouchPlus Revival. Read it first in a new ChatGPT/Codex session, then inspect the active branch/PR before changing code.
 
@@ -10,7 +10,7 @@ Revive the abandoned Ractiv Touch+ as a modern stereo/3D input device without re
 
 Canonical pipeline:
 
-`Etron/USB unlock → persistent stereo capture → local metric calibration → rectification → disparity/depth → 3D tracking → useful runtime outputs`
+`Etron/USB unlock → persistent stereo capture → local metric calibration → rectification → disparity/depth → working-surface frame → 3D hand/finger tracking → useful runtime outputs`
 
 Revival code lives under `revival/`; canonical integration branch is `revival/main`.
 
@@ -25,8 +25,7 @@ Canonical base: `revival/main`
 ### Completed / merged
 
 - **Phase 0 — Hardware Probe / Atomic Capture**
-  - physical Touch+ detected;
-  - Etron vendor control + `SWUnlock(0x0107)` work;
+  - Touch+ detected and unlocked with Etron vendor control + `SWUnlock(0x0107)`;
   - IMU works;
   - real 1280x480 stereo frame splits into two 640x480 eyes.
 
@@ -44,35 +43,43 @@ Canonical base: `revival/main`
 - **Phase 1B.2a — Persistent live calibration capture** — PR #4 merged at `45a1eda7dfaf8f5adafcf556b69b9ad1b8dabcb5`.
   - canonical executable: `touchplus_calibration_capture.exe`;
   - one unlock + one persistent stream;
-  - LEFT/RIGHT preview remains live;
-  - SPACE saves synchronized pairs without camera reopen;
-  - gray/uniform guard;
-  - physical 3-pair smoke PASS;
   - 20-pose physical calibration dataset captured.
 
 - **Phase 1B.2b — Robust local metric calibration solver** — PR #5 merged at `b04d703499d1af8cea14416c2eec4fb5420868bd`.
   - reproducible Python solver;
   - robust outlier filtering;
-  - rectification diagnostics;
-  - JSON/YAML bundle outputs;
-  - real 20-pose numeric solve PASS.
+  - JSON/YAML calibration bundle + rectification diagnostics.
 
-### Active / closing slice
+- **Phase 1C.1 — Physical metric-depth validation** — PR #6 merged at `ae0efe18dcd0616628b83af432909ee01499d507`.
+  - solved baseline `59.953 mm` vs physical lens spacing `60–61 mm`;
+  - clean 350/600 mm physical depth test preserves distance delta to `+0.82%`;
+  - calibration state: `candidate_physical_depth_validated`.
 
-**Phase 1C — candidate calibration + physical metric depth validation**
+- **Phase 1C.2 — Live rectified metric depth viewer** — PR #7 merged at `2c1575efe8f9fc139a553818cb8282d15450855c`.
+  - persistent live rectification + diagnostic heatmap;
+  - hardened full-resolution cursor matcher: texture gate, NCC, uniqueness, LEFT↔RIGHT consistency, local disparity consensus, temporal rejection;
+  - `P` locked probe reports valid %, median Z, MAD and confidence;
+  - physical long-run smoke removed previous catastrophic false depths;
+  - same fixed planar target, seven independent valid probe locations: fitted 3D plane `R²≈0.9984`, RMS residual `≈0.41 mm`, max residual `≈0.57 mm`;
+  - one texture-poor location correctly returned 0 valid samples instead of a false finite Z.
 
-- branch: `revival/phase1c-depth-validation`
-- PR: **#6**
-- candidate: `revival/calibration/candidates/0101007379.json`
-- diagnostic: `revival/tools/touchplus-depth-sanity.py`
-- notes: `revival/notes/phase1c-depth-validation.md`
-- CI: `.github/workflows/revival-depth-sanity.yml`
+### Active slice
 
-Physical metric-depth smoke is now **PASS**. Candidate state is:
+**Phase 2A — working-surface frame calibration**
 
-`candidate_physical_depth_validated`
+- branch: `revival/phase2a-surface-frame`
+- PR: **#8** (Draft until physical smoke)
+- notes: `revival/notes/phase2a-surface-frame.md`
+- CI: `.github/workflows/revival-surface-frame.yml`
 
-The calibration is accepted for the next live runtime integration slice but is not yet consumed by the live runtime.
+Goal: learn the table/work-surface pose separately from immutable stereo calibration so the Touch+ mechanical pitch hinge is a supported setup variable rather than a geometry bug.
+
+Runtime surface coordinates:
+
+- `Xsurface`, `Ysurface`: coordinates inside the fitted work plane;
+- `H`: signed perpendicular distance from that plane;
+- `H = 0`: surface;
+- `H > 0`: point above surface, toward the cameras.
 
 ---
 
@@ -85,6 +92,7 @@ Physical unit:
 - historical sensor: `OV7740`
 - serial: **`0101007379`**
 - historical cloud key: **`7379`**
+- two lens centers measured at approximately **60–61 mm** apart.
 
 Confirmed control behavior:
 
@@ -107,159 +115,114 @@ Stereo facts:
 
 Do not reopen the 60-fps investigation unless later functionality truly requires it.
 
+The physical camera bar has a mechanical pitch hinge. Moving that hinge does **not** invalidate intrinsic/stereo calibration, but it **does** invalidate the camera-to-working-surface transform. Refit Phase 2A after moving the hinge or Touch+ base.
+
 ---
 
-## 3. Calibration target / physical dataset
+## 3. Calibration / metric geometry facts
 
-Metric target:
+Printed target:
 
-- 10x7 printed squares;
+- 10x7 squares;
 - 9x6 inner corners;
 - 25.0 mm square size;
-- 250x175 mm board;
-- A4 landscape at 100% / Actual Size.
+- A4 landscape at 100% actual size;
+- printed 100 mm reference physically measured exact.
 
-The printed 100 mm reference bar was physically measured as exactly 100 mm.
-
-The deprecated repeated PowerShell one-shot capture loop must never be reused. Canonical capture is `touchplus_calibration_capture.exe` with one persistent camera session.
-
-Physical calibration dataset:
+Physical dataset:
 
 - 20 synchronized stereo pairs;
-- 40 eye PNGs;
-- 20/20 pairs yield complete 54/54 checkerboard-corner detection in both eyes.
+- all 20 pairs detect 54/54 internal corners in both eyes;
+- robust final solve uses 17 pairs, excluding 016/017/018.
 
-Raw user photos remain evidence only and are not committed publicly.
+Accepted solve:
 
----
-
-## 4. Phase 1B.2b accepted solver result
-
-Robust policy:
-
-`combined LEFT/RIGHT mono reprojection RMSE → median + 2.5 × robust MAD sigma`
-
-Physical 20-pose result:
-
-- input: 20;
-- complete detected: 20;
-- final accepted: 17;
-- excluded gross outliers: 016, 017, 018;
-- robust threshold: 1.0305 px;
 - mono RMS LEFT: **0.3472 px**;
 - mono RMS RIGHT: **0.3912 px**;
 - stereo RMS: **0.3799 px**;
-- solved baseline: **59.953 mm**;
+- baseline: **59.953 mm**;
 - rectified vertical epipolar mean: **0.1195 px**;
 - p95: **0.3096 px**;
 - max: **1.2763 px**.
 
-Rectified previews visually PASS: matching features align horizontally, no eye swap, no orientation regression.
+Camera-coordinate depth physical validation:
 
-Independent physical lens-center spacing was measured at approximately **60–61 mm**, confirming the solved baseline/metric target scale.
+- ruler/front-plane 350±5 mm → camera-Z 380.63 mm;
+- ruler/front-plane 600±5 mm → camera-Z 632.68 mm;
+- physical delta 250 mm vs stereo delta 252.05 mm → **+0.82%** scale error;
+- approximately fixed front-reference to camera-origin offset ~31.7 mm is documented but never baked into `K/D/R/T/P/Q`.
 
----
-
-## 5. Phase 1C physical metric-depth smoke — PASS
-
-The first two-box smoke used an incorrectly packaged ruler and its absolute reference values were invalidated. Do not reuse those distances.
-
-A clean repeat used one centered textured Chocapic box at two independently measured front-plane distances:
-
-- pair 001: **350 mm ±5 mm**;
-- pair 002: **600 mm ±5 mm**.
-
-Both pairs are serial `0101007379`, 640x480 LEFT/RIGHT and already in canonical upright orientation.
-
-Validation method:
-
-- candidate rectification;
-- dense StereoSGBM coherence check;
-- epipolar-constrained SIFT correspondences on the planar textured box face;
-- robust disparity-plane fit;
-- evaluate Z at the rectified principal point / stereo axis.
-
-Camera-coordinate Z results:
-
-- pair 001: **380.63 mm**;
-- pair 002: **632.68 mm**.
-
-The absolute values differ from ruler readings because `Q` reports camera-coordinate Z while the ruler was referenced to the Touch+ lens/front plane. The implied additive origin offsets are +30.63 mm and +32.68 mm, consistent with a fixed ~31.66 mm reference-origin difference within the physical measurement uncertainty.
-
-The decisive scale test is the distance change:
-
-- physical delta: `600 - 350 = 250 mm`;
-- stereo delta: `632.68 - 380.63 = 252.05 mm`;
-- delta-scale error: **+0.82%**.
-
-Acceptance gates:
-
-- rectified orientation/alignment: PASS;
-- near/far ordering: PASS;
-- useful textured dense disparity: PASS;
-- solved baseline vs physical lens spacing: PASS;
-- metric delta scale: PASS;
-- no gross sign / eye-order / scale / Q failure: PASS.
-
-Important: the inferred ~31.66 mm front-plane-to-camera-origin offset is documented but **not baked into K/D/R/T/P/Q**. Camera-coordinate Z remains canonical geometry.
+Raw personal calibration/test images are evidence only and must not be committed publicly.
 
 ---
 
-## 6. NEXT ACTION — live rectified depth runtime
+## 4. Phase 2A design — surface frame
 
-After PR #6 closeout, open the next Phase 1C runtime slice.
+The surface frame is a **separate per-setup artifact** saved beside the runtime as:
 
-Canonical goals:
+`surface/<serial>.json`
 
-1. load validated calibration by serial `0101007379`;
-2. retain the accepted Etron unlock + single persistent stereo stream;
-3. rectify live LEFT/RIGHT frames;
-4. compute live disparity;
-5. reproject with `Q` to metric camera-coordinate Z;
-6. add diagnostic views:
-   - raw stereo;
-   - rectified stereo;
-   - disparity;
-   - depth visualization;
-   - point/cursor depth readout;
-7. characterize depth stability/error at several known distances over the intended working volume.
+It must never mutate the per-serial camera calibration.
 
-Do not begin hand/finger tracking until live metric geometry is stable.
+Current controls layered into `touchplus_depth_viewer.exe`:
 
----
+- `C` — capture one fixed surface point for 45 frames with the hardened matcher;
+- `F` — robust plane fit from pending points; MAD outlier rejection; save MEDIUM/HIGH fits only;
+- `R` — reset pending surface samples only;
+- `H` — print camera XYZ + `Xsurface / Ysurface / H`;
+- `P` — existing Phase 1C locked probe diagnostic;
+- `D` / `S` / `Q` — existing depth / rectified stereo / quit.
 
-## 7. Phase 2 — modern tracking core
+Recommended calibration: **8–12 well-spread textured points** over the intended work area, including left/right and near/far image regions.
 
-After live depth is trustworthy:
+Surface confidence uses:
 
-1. foreground / working-surface mask;
-2. hand region detection;
-3. finger/index candidate extraction;
-4. stereo correspondence using rectified geometry;
-5. triangulated 3D fingertip position;
-6. temporal smoothing / confidence;
-7. touch-plane calibration;
-8. hover / touch-down / release state.
+- sample/inlier count;
+- plane RMS and max residual;
+- spatial X/Y coverage.
 
-Start with geometry-first methods; do not jump to a giant AI model unless needed.
+LOW fits are not saved.
+
+### Physical acceptance required before merge PR #8
+
+1. keep Touch+ base + pitch hinge fixed;
+2. capture >=8 broad surface points with `C`;
+3. press `F`; require MEDIUM/HIGH fit;
+4. check `H` on several bare-surface textured positions → close to 0 mm;
+5. put one rigid textured object of known thickness on the surface → top-face `H` positive and plausibly near thickness;
+6. no regression in persistent capture, rectification or Phase 1C camera-Z behavior.
 
 ---
 
-## 8. Phase 3 — useful outputs
+## 5. Phase 2B — hand/fingertip tracking (after Phase 2A)
+
+Only after the working-surface frame is physically accepted:
+
+1. derive surface-relative foreground from `H` rather than raw camera-Z;
+2. isolate hand region above the plane;
+3. extract index/fingertip candidates;
+4. produce live `(Xsurface, Ysurface, H)` fingertip position;
+5. add temporal smoothing and confidence;
+6. distinguish hover / touch-down / release from surface-relative height and motion.
+
+Start geometry-first. Do not jump to a giant AI model unless needed.
+
+---
+
+## 6. Phase 3 — useful outputs
 
 Potential outputs:
 
 - Windows pointer/touch;
 - gestures / pinch;
-- OSC;
-- MIDI;
+- OSC / MIDI;
 - Unity/Unreal bridge;
 - custom app integrations;
 - debug telemetry / recording.
 
 ---
 
-## 9. Constraints / cautions
+## 7. Constraints / cautions
 
 - historical Etron stack is Win32/32-bit;
 - Etron COM initialization needs compatibility handling;
@@ -267,11 +230,13 @@ Potential outputs:
 - software unlock is required before useful video;
 - camera reopen can cause gray state;
 - accepted physical rate baseline is ~30 fps;
+- never reuse the deprecated repeated PowerShell one-shot calibration workflow;
 - raw personal calibration/test photos must not be committed publicly;
+- moving the Touch+ base or pitch hinge requires **surface-frame** recalibration, not stereo recalibration;
 - historical Ractiv/Etron redistribution rights must be reviewed before any public bundled installer.
 
 ---
 
-## 10. One-line handoff
+## 8. One-line handoff
 
-> `@GitHub Reprends TouchPlus Revival depuis revival/REVIVAL-ROADMAP.md. PR #4 (persistent calibration capture) et PR #5 (robust metric solver) sont mergées. PR #6 / revival/phase1c-depth-validation has physical metric-depth PASS: solved baseline 59.953 mm vs physical 60–61 mm; clean centered Chocapic test at 350±5 and 600±5 mm gives camera-Z 380.63 and 632.68 mm, delta 252.05 mm vs physical 250 mm (+0.82%). Candidate state = candidate_physical_depth_validated; next boundary = live rectified disparity/depth runtime, without reusing the deprecated PowerShell one-shot calibration path.`
+> `@GitHub Reprends TouchPlus Revival depuis revival/REVIVAL-ROADMAP.md. PR #7 live metric depth is merged at 2c1575e. Active Phase 2A is PR #8 / revival/phase2a-surface-frame: keep immutable camera calibration, fit a separate working-surface frame so Xsurface/Ysurface/H absorb the Touch+ mechanical pitch hinge. Current runtime adds C=capture surface point, F=fit/save, R=reset pending, H=measure surface-relative height. Do not merge #8 until physical surface smoke passes.`
