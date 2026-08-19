@@ -1,0 +1,83 @@
+name: Revival Surface Frame
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "revival/**"
+    paths:
+      - "revival/**"
+      - ".github/workflows/revival-surface-frame.yml"
+  pull_request:
+    paths:
+      - "revival/**"
+      - ".github/workflows/revival-surface-frame.yml"
+
+jobs:
+  surface-math-x64:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure x64
+        run: cmake -S revival -B build/surface-x64 -A x64
+
+      - name: Build surface-frame self-test x64
+        run: cmake --build build/surface-x64 --config Release --target touchplus_surface_frame_selftest
+
+      - name: Run surface-frame self-test x64
+        shell: pwsh
+        run: |
+          & "build/surface-x64/Release/touchplus_surface_frame_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Surface-frame x64 self-test failed: $LASTEXITCODE" }
+
+  phase2a-win32:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Win32
+        run: cmake -S revival -B build/surface-x86 -A Win32
+
+      - name: Build Win32 Revival targets
+        run: cmake --build build/surface-x86 --config Release
+
+      - name: Run surface-frame self-test Win32
+        shell: pwsh
+        run: |
+          & "build/surface-x86/Release/touchplus_surface_frame_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Surface-frame Win32 self-test failed: $LASTEXITCODE" }
+
+      - name: Re-run Phase 1C calibration/Q self-test
+        shell: pwsh
+        run: |
+          $exe = "build/surface-x86/Release/touchplus_depth_viewer.exe"
+          $cal = "revival/calibration/candidates/0101007379.json"
+          if (-not (Test-Path $exe)) { throw "touchplus_depth_viewer.exe was not produced" }
+          & $exe --self-test $cal
+          if ($LASTEXITCODE -ne 0) { throw "Phase 1C depth self-test regressed: $LASTEXITCODE" }
+
+      - name: Prepare Phase 2A surface-frame kit
+        shell: pwsh
+        run: |
+          $src = "build/surface-x86/Release"
+          $kit = "build/touchplus-phase2a-surface-frame"
+          New-Item -ItemType Directory -Force -Path $kit | Out-Null
+          New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
+          Copy-Item "$src/touchplus_depth_viewer.exe" "$kit/touchplus_depth_viewer.exe"
+          Copy-Item "$src/eSPAEAWBCtrl.dll" "$kit/eSPAEAWBCtrl.dll"
+          Copy-Item "$src/eSPDI.dll" "$kit/eSPDI.dll"
+          Copy-Item "$src/EtLib.dll" "$kit/EtLib.dll"
+          Copy-Item "revival/calibration/candidates/0101007379.json" "$kit/calibration/0101007379.json"
+          Copy-Item "revival/notes/phase2a-surface-frame.md" "$kit/README-surface-frame.md"
+          Get-ChildItem -Recurse $kit | Select-Object FullName,Length | Format-Table -AutoSize
+
+      - name: Upload Phase 2A surface-frame kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchplus-phase2a-surface-frame-windows-x86
+          path: build/touchplus-phase2a-surface-frame/**
+          if-no-files-found: error
+          retention-days: 30
