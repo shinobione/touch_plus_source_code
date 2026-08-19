@@ -1,16 +1,18 @@
 # TouchPlus Revival — canonical roadmap / handoff
 
-Last updated: **2026-08-19 17:08 CEST**
+Last updated: **2026-08-19 18:10 CEST**
 
-This file is the canonical resume point for TouchPlus Revival. Read it first in a new ChatGPT/Codex session, then inspect the active PR/branch before changing code.
+This file is the canonical resume point for TouchPlus Revival. Read it first in a new ChatGPT/Codex session, then inspect the active branch/PR before changing code.
 
 ## 0. Project intent
 
-Revive the abandoned Ractiv Touch+ as a modern stereo/3D input device. Do not resurrect the complete old 2015 UI stack. Revival code lives under `revival/`; canonical integration branch is `revival/main`.
+Revive the abandoned Ractiv Touch+ as a modern stereo/3D input device without resurrecting the complete 2015 UI stack.
 
-Target pipeline:
+Canonical pipeline:
 
-`Etron/USB unlock → persistent stereo capture → local metric calibration → rectification → disparity/depth → 3D tracking → useful runtime outputs`.
+`Etron/USB unlock → persistent stereo capture → local metric calibration → rectification → disparity/depth → 3D tracking → useful runtime outputs`
+
+Revival code lives under `revival/`; canonical integration branch is `revival/main`.
 
 ---
 
@@ -23,51 +25,54 @@ Canonical base: `revival/main`
 ### Completed / merged
 
 - **Phase 0 — Hardware Probe / Atomic Capture**
-  - physical device detected;
-  - Etron vendor control + SWUnlock work;
+  - physical Touch+ detected;
+  - Etron vendor control + `SWUnlock(0x0107)` work;
   - IMU works;
   - real 1280x480 stereo frame splits into two 640x480 eyes.
 
 - **Phase 1A — Stable Stereo Viewer**
   - persistent LEFT/RIGHT live viewer;
-  - vertical Ractiv flip reproduced;
+  - historical vertical flip reproduced;
   - GDI flicker fixed;
-  - physical delivery measured ~30 fps despite advertised 60.
+  - device advertises 60 fps but physically delivers ~30 fps on this unit/driver path.
 
 - **Phase 1B.1 — Factory calibration identity recovery**
-  - serial `0101007379` recovered from flash;
+  - Ractiv serial `0101007379` recovered from flash;
   - historical cloud key `7379` derived;
-  - old factory CDN confirmed dead.
+  - old factory CDN confirmed unavailable.
 
 - **Phase 1B.2a — Persistent live calibration capture** — PR #4 merged at `45a1eda7dfaf8f5adafcf556b69b9ad1b8dabcb5`.
-  - canonical capture executable: `touchplus_calibration_capture.exe`;
+  - canonical executable: `touchplus_calibration_capture.exe`;
   - one unlock + one persistent stream;
   - LEFT/RIGHT preview remains live;
-  - SPACE saves synchronized pairs without reopen;
+  - SPACE saves synchronized pairs without camera reopen;
   - gray/uniform guard;
   - physical 3-pair smoke PASS;
-  - 20-pose physical dataset subsequently captured.
+  - 20-pose physical calibration dataset captured.
 
 - **Phase 1B.2b — Robust local metric calibration solver** — PR #5 merged at `b04d703499d1af8cea14416c2eec4fb5420868bd`.
   - reproducible Python solver;
   - robust outlier filtering;
   - rectification diagnostics;
-  - JSON/YAML calibration bundle outputs;
-  - solver CI green;
+  - JSON/YAML bundle outputs;
   - real 20-pose numeric solve PASS.
 
-### Active slice
+### Active / closing slice
 
 **Phase 1C — candidate calibration + physical metric depth validation**
 
 - branch: `revival/phase1c-depth-validation`
-- expected PR: **#6**
-- candidate calibration: `revival/calibration/candidates/0101007379.json`
-- offline depth diagnostic: `revival/tools/touchplus-depth-sanity.py`
+- PR: **#6**
+- candidate: `revival/calibration/candidates/0101007379.json`
+- diagnostic: `revival/tools/touchplus-depth-sanity.py`
 - notes: `revival/notes/phase1c-depth-validation.md`
 - CI: `.github/workflows/revival-depth-sanity.yml`
 
-The candidate is explicitly guarded as `candidate_pending_physical_depth_validation`. Do not promote it to the live runtime until known-distance depth sanity passes.
+Physical metric-depth smoke is now **PASS**. Candidate state is:
+
+`candidate_physical_depth_validated`
+
+The calibration is accepted for the next live runtime integration slice but is not yet consumed by the live runtime.
 
 ---
 
@@ -81,7 +86,7 @@ Physical unit:
 - serial: **`0101007379`**
 - historical cloud key: **`7379`**
 
-Confirmed control path:
+Confirmed control behavior:
 
 - Etron init/enumeration/select works;
 - `eSPAEAWB_SetSensorType(OV7740)` works;
@@ -90,45 +95,45 @@ Confirmed control path:
 - exposure/gain/GPIO/LED calls work;
 - recovered Ractiv LegacyInit works.
 
-Critical behavior: Touch+ video is session-sensitive. Reliable software must unlock then keep the video stream open in one controlled flow. Reopening/switching clients can return a gray stream.
+Critical behavior: video state is session-sensitive. Reliable software must unlock and keep the stream open in one controlled flow. Reopening/switching camera clients can return gray video.
 
 Stereo facts:
 
-- advertised native mode: `1280x480 @ 60 fps MJPG`;
+- advertised mode: `1280x480 @ 60 fps MJPG`;
 - LEFT / RIGHT: 640x480 each;
-- real stereo parallax confirmed;
+- real physical stereo parallax confirmed;
 - canonical orientation requires historical vertical flip;
-- accepted physical cadence: ~30 fps.
+- accepted measured cadence: ~30 fps.
 
-Do not reopen the 60-fps investigation unless a later phase truly needs it.
+Do not reopen the 60-fps investigation unless later functionality truly requires it.
 
 ---
 
-## 3. Calibration target / capture evidence
+## 3. Calibration target / physical dataset
 
 Metric target:
 
 - 10x7 printed squares;
 - 9x6 inner corners;
-- 25.0 mm squares;
+- 25.0 mm square size;
 - 250x175 mm board;
-- A4 landscape at 100% Actual Size.
+- A4 landscape at 100% / Actual Size.
 
-The physical 100 mm reference bar measured exactly 100 mm.
+The printed 100 mm reference bar was physically measured as exactly 100 mm.
 
-The deprecated repeated PowerShell one-shot capture loop must never be reused. The accepted capture is `touchplus_calibration_capture.exe`, which keeps one persistent stereo session open.
+The deprecated repeated PowerShell one-shot capture loop must never be reused. Canonical capture is `touchplus_calibration_capture.exe` with one persistent camera session.
 
-### Physical dataset
+Physical calibration dataset:
 
-- 20 synchronized stereo pairs captured;
+- 20 synchronized stereo pairs;
 - 40 eye PNGs;
-- **20/20 pairs** produce complete 54/54 checkerboard corner detection in both eyes.
+- 20/20 pairs yield complete 54/54 checkerboard-corner detection in both eyes.
 
-Raw user photos are evidence and should not be committed to the public repo.
+Raw user photos remain evidence only and are not committed publicly.
 
 ---
 
-## 4. Phase 1B.2b real solver result — PASS
+## 4. Phase 1B.2b accepted solver result
 
 Robust policy:
 
@@ -136,162 +141,137 @@ Robust policy:
 
 Physical 20-pose result:
 
-- input: **20**
-- complete detected pairs: **20**
-- accepted final pairs: **17**
-- excluded gross outliers: **016, 017, 018**
-- threshold: **1.0305 px**
+- input: 20;
+- complete detected: 20;
+- final accepted: 17;
+- excluded gross outliers: 016, 017, 018;
+- robust threshold: 1.0305 px;
+- mono RMS LEFT: **0.3472 px**;
+- mono RMS RIGHT: **0.3912 px**;
+- stereo RMS: **0.3799 px**;
+- solved baseline: **59.953 mm**;
+- rectified vertical epipolar mean: **0.1195 px**;
+- p95: **0.3096 px**;
+- max: **1.2763 px**.
 
-Final metrics:
+Rectified previews visually PASS: matching features align horizontally, no eye swap, no orientation regression.
 
-- mono RMS LEFT: **0.3472 px**
-- mono RMS RIGHT: **0.3912 px**
-- stereo RMS: **0.3799 px**
-- stereo baseline: **59.953 mm**
-- rectified vertical epipolar mean: **0.1195 px**
-- p95: **0.3096 px**
-- max: **1.2763 px**
-
-Rectified contact-sheet review PASS: matching checkerboard features align horizontally, no eye swap, no orientation regression.
-
-The checkerboard also gives coherent sparse triangulation / near-far ordering. However, its repeating texture is a poor final target for **dense** StereoSGBM because repeated squares can cause disparity phase ambiguity. Physical dense-depth validation must therefore use a textured non-repeating real scene.
+Independent physical lens-center spacing was measured at approximately **60–61 mm**, confirming the solved baseline/metric target scale.
 
 ---
 
-## 5. Phase 1C implementation
+## 5. Phase 1C physical metric-depth smoke — PASS
 
-### Candidate calibration
+The first two-box smoke used an incorrectly packaged ruler and its absolute reference values were invalidated. Do not reuse those distances.
 
-`revival/calibration/candidates/0101007379.json`
+A clean repeat used one centered textured Chocapic box at two independently measured front-plane distances:
 
-Contains the accepted Phase 1B.2b matrices and quality metrics:
+- pair 001: **350 mm ±5 mm**;
+- pair 002: **600 mm ±5 mm**.
 
-- `K1`, `D1`, `K2`, `D2`;
-- stereo `R`, `T_mm`;
-- `E`, `F`;
-- `R1`, `R2`;
-- `P1`, `P2`;
-- `Q`;
-- ROIs;
-- accepted/rejected source pair numbers.
+Both pairs are serial `0101007379`, 640x480 LEFT/RIGHT and already in canonical upright orientation.
 
-Promotion state remains:
+Validation method:
 
-`candidate_pending_physical_depth_validation`
+- candidate rectification;
+- dense StereoSGBM coherence check;
+- epipolar-constrained SIFT correspondences on the planar textured box face;
+- robust disparity-plane fit;
+- evaluate Z at the rectified principal point / stereo axis.
 
-### Offline metric-depth diagnostic
+Camera-coordinate Z results:
 
-`revival/tools/touchplus-depth-sanity.py`
+- pair 001: **380.63 mm**;
+- pair 002: **632.68 mm**.
 
-Inputs:
+The absolute values differ from ruler readings because `Q` reports camera-coordinate Z while the ruler was referenced to the Touch+ lens/front plane. The implied additive origin offsets are +30.63 mm and +32.68 mm, consistent with a fixed ~31.66 mm reference-origin difference within the physical measurement uncertainty.
 
-- candidate JSON;
-- one synchronized LEFT image;
-- one synchronized RIGHT image.
+The decisive scale test is the distance change:
 
-It:
+- physical delta: `600 - 350 = 250 mm`;
+- stereo delta: `632.68 - 380.63 = 252.05 mm`;
+- delta-scale error: **+0.82%**.
 
-1. rectifies both eyes;
-2. computes StereoSGBM disparity;
-3. reprojects disparity through `Q` into millimetres;
-4. writes rectified images, disparity, depth visualization and NumPy depth/disparity arrays;
-5. supports known-distance point samples;
-6. can gate absolute percent error when a threshold is supplied.
+Acceptance gates:
 
-This remains an offline diagnostic. Live runtime integration is intentionally blocked until physical validation passes.
+- rectified orientation/alignment: PASS;
+- near/far ordering: PASS;
+- useful textured dense disparity: PASS;
+- solved baseline vs physical lens spacing: PASS;
+- metric delta scale: PASS;
+- no gross sign / eye-order / scale / Q failure: PASS.
 
----
-
-## 6. NEXT ACTION — physical metric depth smoke
-
-Use a **textured non-repeating scene**, not the checkerboard.
-
-Suggested setup:
-
-- near textured object front face at roughly **300–400 mm** from the Touch+ lens/front plane;
-- far textured object front face at roughly **600–800 mm**;
-- both visible in LEFT and RIGHT;
-- avoid shiny surfaces and large blank areas;
-- measure each distance with a ruler/tape to about 5–10 mm accuracy.
-
-Capture one synchronized pair using the accepted persistent executable, keeping this test separate from calibration data:
-
-```powershell
-.\touchplus_calibration_capture.exe --pairs 1 --output .\depth-validation\raw
-```
-
-The capture executable does **not** require a checkerboard to save; it simply saves synchronized full/LEFT/RIGHT frames when SPACE is pressed.
-
-Upload/ZIP the resulting `depth-validation` folder and report the measured near/far distances.
-
-Then run/review `touchplus-depth-sanity.py` on the pair.
-
-### Acceptance boundary
-
-Advance toward live Phase 1C integration only if:
-
-- rectified orientation/alignment remains correct;
-- near object yields smaller Z than far object;
-- useful textured regions have coherent disparity;
-- metric scale is plausible against tape/ruler distances;
-- there is no gross sign, scale, eye-order or Q failure.
-
-Do not promise final accuracy yet. First establish physically coherent metric depth, then characterize error over the intended working volume.
+Important: the inferred ~31.66 mm front-plane-to-camera-origin offset is documented but **not baked into K/D/R/T/P/Q**. Camera-coordinate Z remains canonical geometry.
 
 ---
 
-## 7. After physical depth PASS
+## 6. NEXT ACTION — live rectified depth runtime
 
-Next Phase 1C runtime work:
+After PR #6 closeout, open the next Phase 1C runtime slice.
 
-- load calibration by serial;
-- rectify live LEFT/RIGHT frames;
-- disparity diagnostic mode;
-- metric depth via `Q`;
-- depth visualization;
-- point-depth readout;
-- characterize known-distance error over the useful Touch+ volume.
+Canonical goals:
 
-Only after geometry/depth is trustworthy should Phase 2 begin hand/finger/touch-plane tracking.
+1. load validated calibration by serial `0101007379`;
+2. retain the accepted Etron unlock + single persistent stereo stream;
+3. rectify live LEFT/RIGHT frames;
+4. compute live disparity;
+5. reproject with `Q` to metric camera-coordinate Z;
+6. add diagnostic views:
+   - raw stereo;
+   - rectified stereo;
+   - disparity;
+   - depth visualization;
+   - point/cursor depth readout;
+7. characterize depth stability/error at several known distances over the intended working volume.
+
+Do not begin hand/finger tracking until live metric geometry is stable.
 
 ---
 
-## 8. Later phases
+## 7. Phase 2 — modern tracking core
 
-### Phase 2 — modern tracking core
+After live depth is trustworthy:
 
 1. foreground / working-surface mask;
 2. hand region detection;
 3. finger/index candidate extraction;
-4. stereo correspondence;
-5. triangulated 3D fingertip;
-6. smoothing/confidence;
+4. stereo correspondence using rectified geometry;
+5. triangulated 3D fingertip position;
+6. temporal smoothing / confidence;
 7. touch-plane calibration;
-8. hover/touch/release states.
+8. hover / touch-down / release state.
 
-### Phase 3 — outputs
+Start with geometry-first methods; do not jump to a giant AI model unless needed.
+
+---
+
+## 8. Phase 3 — useful outputs
+
+Potential outputs:
 
 - Windows pointer/touch;
-- gestures/pinch;
-- OSC/MIDI;
+- gestures / pinch;
+- OSC;
+- MIDI;
 - Unity/Unreal bridge;
-- custom integrations.
+- custom app integrations;
+- debug telemetry / recording.
 
 ---
 
 ## 9. Constraints / cautions
 
-- old Etron stack is Win32/32-bit;
-- Etron COM initialization requires compatibility care;
+- historical Etron stack is Win32/32-bit;
+- Etron COM initialization needs compatibility handling;
 - Windows Camera is diagnostic only;
-- software unlock required before useful video;
+- software unlock is required before useful video;
 - camera reopen can cause gray state;
-- physical rate baseline ~30 fps;
+- accepted physical rate baseline is ~30 fps;
 - raw personal calibration/test photos must not be committed publicly;
-- historical Ractiv and Etron redistribution rights must be reviewed before any public bundled installer.
+- historical Ractiv/Etron redistribution rights must be reviewed before any public bundled installer.
 
 ---
 
 ## 10. One-line handoff
 
-> `@GitHub Reprends TouchPlus Revival depuis revival/REVIVAL-ROADMAP.md. Phase 1B.2a PR#4 et Phase 1B.2b PR#5 sont mergées. Active slice: branche revival/phase1c-depth-validation / PR #6, candidate calibration 0101007379 + touchplus-depth-sanity.py. Prochaine boundary: smoke physique sur scène texturée à deux distances connues, capture persistante --pairs 1 --output .\\depth-validation\\raw, puis validation du Z métrique avant toute intégration runtime.`
+> `@GitHub Reprends TouchPlus Revival depuis revival/REVIVAL-ROADMAP.md. PR #4 (persistent calibration capture) et PR #5 (robust metric solver) sont mergées. PR #6 / revival/phase1c-depth-validation has physical metric-depth PASS: solved baseline 59.953 mm vs physical 60–61 mm; clean centered Chocapic test at 350±5 and 600±5 mm gives camera-Z 380.63 and 632.68 mm, delta 252.05 mm vs physical 250 mm (+0.82%). Candidate state = candidate_physical_depth_validated; next boundary = live rectified disparity/depth runtime, without reusing the deprecated PowerShell one-shot calibration path.`
