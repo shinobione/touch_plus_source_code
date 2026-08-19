@@ -34,6 +34,23 @@ target_link_libraries(touchplus_usb_probe PRIVATE
     setupapi
 )
 
+# Phase 2A geometry is hardware-independent. Keep a synthetic robust-plane
+# self-test available in both x64 and Win32 CI so surface-frame math cannot
+# silently regress while the live Touch+ target remains Win32-only.
+add_executable(touchplus_surface_frame_selftest
+    src/surface_frame_selftest.cpp
+    src/surface_frame_math.h
+    src/depth_math.h
+)
+list(APPEND REVIVAL_TARGETS touchplus_surface_frame_selftest)
+target_compile_features(touchplus_surface_frame_selftest PRIVATE cxx_std_20)
+target_compile_definitions(touchplus_surface_frame_selftest PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+)
+target_include_directories(touchplus_surface_frame_selftest PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
 # The recovered Etron control SDK is 32-bit only. Anything that combines
 # vendor unlock/control with live video therefore gets a dedicated Win32 build.
 if(CMAKE_SIZEOF_VOID_P EQUAL 4)
@@ -109,15 +126,18 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${ETRON_DIR}/eSPAEAWBCtrl.lib"
     )
 
-    # Phase 1C live integration consumes only a physically validated
-    # per-serial calibration. It rectifies both eyes in-process, computes a
-    # dependency-free diagnostic disparity heatmap and reports full-resolution
-    # subpixel camera-coordinate Z under the mouse cursor through Q.
+    # Phase 1C + Phase 2A live integration consumes the physically validated
+    # per-serial stereo calibration, then optionally learns a working-surface
+    # coordinate frame. Camera calibration/Q stay immutable; surface pose is a
+    # separate per-device/per-setup artifact.
     add_executable(touchplus_depth_viewer
         src/depth_viewer.cpp
         src/depth_math.h
         src/depth_point_robust.h
         src/depth_probe_lock.h
+        src/surface_frame_math.h
+        src/depth_surface_frame.h
+        src/depth_surface_frame_runtime.h
     )
     list(APPEND REVIVAL_TARGETS touchplus_depth_viewer)
     target_compile_features(touchplus_depth_viewer PRIVATE cxx_std_20)
@@ -128,15 +148,13 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${ETRON_DIR}"
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
-    # Keep depth_math.h as the dependency-free reference implementation. The
-    # first forced header replaces the permissive cursor matcher with the
-    # hardened texture/NCC/LR-consistency/local-consensus/temporal matcher. The
-    # second adds a P-key locked diagnostic wrapper reporting valid %, median Z,
-    # MAD and confidence without changing calibration/Q or normal live behavior.
+    # One composite forced header preserves the hardened NCC/LR/consensus/
+    # temporal matcher and P-key diagnostics, then layers Phase 2A surface
+    # C/F/R/H controls above them. The underlying depth_viewer.cpp stays on the
+    # proven persistent capture/render path.
     if(MSVC)
         target_compile_options(touchplus_depth_viewer PRIVATE
-            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_point_robust.h"
-            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_probe_lock.h"
+            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_surface_frame_runtime.h"
         )
     endif()
     target_link_libraries(touchplus_depth_viewer PRIVATE
