@@ -173,3 +173,51 @@ jobs:
             build/revival-x86/Release/EtLib.dll
           if-no-files-found: error
           retention-days: 30
+
+      - name: Self-test Phase 1C live depth viewer
+        if: steps.source.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          $exe = "build/revival-x86/Release/touchplus_depth_viewer.exe"
+          $cal = "revival/calibration/candidates/0101007379.json"
+          if (-not (Test-Path $exe)) { throw "touchplus_depth_viewer.exe was not produced" }
+          & $exe --self-test $cal
+          if ($LASTEXITCODE -ne 0) { throw "Depth viewer self-test failed with exit code $LASTEXITCODE" }
+
+      - name: Prepare Phase 1C live depth viewer kit
+        if: steps.source.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          $src = "build/revival-x86/Release"
+          $kit = "build/revival-depth-viewer-kit"
+          New-Item -ItemType Directory -Force -Path $kit | Out-Null
+          New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
+          Copy-Item "$src/touchplus_depth_viewer.exe" "$kit/touchplus_depth_viewer.exe"
+          Copy-Item "$src/eSPAEAWBCtrl.dll" "$kit/eSPAEAWBCtrl.dll"
+          Copy-Item "$src/eSPDI.dll" "$kit/eSPDI.dll"
+          Copy-Item "$src/EtLib.dll" "$kit/EtLib.dll"
+          Copy-Item "revival/calibration/candidates/0101007379.json" "$kit/calibration/0101007379.json"
+          @'
+          TouchPlus Revival - Phase 1C live depth viewer
+
+          Close Windows Camera and every other Touch+ viewer first.
+          Run: .\touchplus_depth_viewer.exe
+
+          Default: RECTIFIED LEFT | DEPTH HEATMAP.
+          Move the mouse over texture to read full-resolution subpixel camera-coordinate Z in mm.
+          D = depth view, S = rectified stereo, ESC/Q = quit.
+
+          The packaged calibration is physically validated for Touch+ serial 0101007379.
+          The executable reads the hardware serial from flash and refuses a mismatched calibration.
+          Heatmap disparity is a dependency-free live diagnostic matcher; offline StereoSGBM remains the reference diagnostic.
+          '@ | Set-Content -Encoding UTF8 "$kit/README-depth-viewer.txt"
+          Get-ChildItem -Recurse $kit | Select-Object FullName,Length | Format-Table -AutoSize
+
+      - name: Upload Phase 1C live depth viewer kit
+        if: steps.source.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchplus-phase1c-live-depth-viewer-windows-x86
+          path: build/revival-depth-viewer-kit/**
+          if-no-files-found: error
+          retention-days: 30
