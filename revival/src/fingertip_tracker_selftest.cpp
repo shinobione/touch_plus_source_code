@@ -1,120 +1,125 @@
-#include "fingertip_tracker_v4.h"
+#include "fingertip_tracker_v5.h"
 
-#include <cmath>
 #include <iostream>
 #include <vector>
 
 int main() {
-    using touchplus::tracking::GridSample;
-    using touchplus::surface::SurfacePoint;
+    const int width = touchplus::depth::kDepthWidth;
+    const int height = touchplus::depth::kDepthHeight;
+    const size_t cells = static_cast<size_t>(width) * height;
 
-    std::vector<GridSample> samples;
+    std::vector<uint8_t> appearance(cells, 0);
+    std::vector<uint8_t> core(cells, 0);
 
-    // Canonical desk setup: forearm enters from TOP of image, broad palm sits
-    // below it, and one index finger extends DOWN toward the work surface.
-    // This mirrors the physical smoke boundary rather than claiming arbitrary
-    // orientation-independent pose understanding.
+    auto mark = [&](std::vector<uint8_t>& mask, int x, int y) {
+        if (x < 0 || x >= width || y < 0 || y >= height) return;
+        mask[static_cast<size_t>(y) * width + x] = 1;
+    };
 
-    // Forearm / wrist entry band.
-    for (int gy = 20; gy <= 78; ++gy) {
-        for (int gx = 151; gx <= 169; ++gx) {
-            const double h = 82.0 + 3.0 * std::sin(gx * 0.17);
-            samples.push_back({gx, gy, SurfacePoint{(gx - 160) * 2.0, (gy - 110) * 2.0, h}, 40.0});
+    // Canonical top-entry forearm.
+    for (int y = 20; y <= 78; ++y) {
+        for (int x = 151; x <= 169; ++x) {
+            mark(appearance, x, y);
+            if ((x + y) % 3 != 0) mark(core, x, y);
         }
     }
 
-    // Palm.
-    for (int gy = 70; gy <= 132; ++gy) {
-        for (int gx = 132; gx <= 188; ++gx) {
-            const double nx = (gx - 160) / 28.0;
-            const double ny = (gy - 102) / 31.0;
+    // Broad palm.
+    for (int y = 70; y <= 132; ++y) {
+        for (int x = 132; x <= 188; ++x) {
+            const double nx = (x - 160) / 28.0;
+            const double ny = (y - 102) / 31.0;
             if (nx * nx + ny * ny > 1.0) continue;
-            const double h = 58.0 + 5.0 * std::sin(gx * 0.13) * std::cos(gy * 0.11);
-            samples.push_back({gx, gy, SurfacePoint{(gx - 160) * 2.0, (gy - 110) * 2.0, h}, 42.0});
+            mark(appearance, x, y);
+            if ((x + 2 * y) % 4 != 0) mark(core, x, y);
         }
     }
 
-    // Extended index finger: distal end is LOWER in image and LOWER in H.
-    for (int gy = 124; gy <= 192; ++gy) {
-        const int half_width = gy > 176 ? 3 : 5;
-        for (int gx = 160 - half_width; gx <= 160 + half_width; ++gx) {
-            const double t = static_cast<double>(gy - 124) / 68.0;
-            const double h = 46.0 - t * 28.0;
-            samples.push_back({gx, gy, SurfacePoint{(gx - 160) * 2.0, (gy - 110) * 2.0, h}, 52.0});
+    // Long index. IMPORTANT regression: the distal 34 rows deliberately have
+    // NO dense-depth core, reproducing the real video where the visible finger
+    // continued below the last reliable disparity cell.
+    for (int y = 124; y <= 194; ++y) {
+        const int half = y > 178 ? 3 : 5;
+        for (int x = 160 - half; x <= 160 + half; ++x) {
+            mark(appearance, x, y);
+            if (y <= 160 && (x + y) % 3 != 0) {
+                mark(core, x, y);
+            }
         }
     }
 
-    // Two shorter folded-finger protrusions. They must lose to the long index.
-    for (int gy = 122; gy <= 148; ++gy) {
-        for (int gx = 140; gx <= 147; ++gx) {
-            samples.push_back({gx, gy, SurfacePoint{(gx - 160) * 2.0, (gy - 110) * 2.0, 42.0}, 48.0});
+    // Two shorter folded-finger branches.
+    for (int y = 120; y <= 148; ++y) {
+        for (int x = 139; x <= 147; ++x) {
+            mark(appearance, x, y);
+            if ((x + y) % 4 != 0) mark(core, x, y);
         }
-        for (int gx = 175; gx <= 182; ++gx) {
-            samples.push_back({gx, gy, SurfacePoint{(gx - 160) * 2.0, (gy - 110) * 2.0, 44.0}, 47.0});
-        }
-    }
-
-    // Prior real-scene regression: a giant false component contains far more
-    // cells than the hand. Hardened segmentation must still reject it.
-    for (int gy = 18; gy <= 138; ++gy) {
-        for (int gx = 4; gx <= 114; ++gx) {
-            const double h = 28.0 + 2.0 * std::sin(gx * 0.11) * std::cos(gy * 0.07);
-            samples.push_back({gx, gy, SurfacePoint{-420.0 + gx * 3.0, -260.0 + gy * 3.0, h}, 34.0});
+        for (int x = 175; x <= 183; ++x) {
+            mark(appearance, x, y);
+            if ((x + y) % 4 != 0) mark(core, x, y);
         }
     }
 
-    const auto segmented = touchplus::tracking::analyze_surface_samples_v2(
-        samples, touchplus::depth::kDepthWidth, touchplus::depth::kDepthHeight);
+    // Large appearance-only distractor: no depth core, therefore it must lose
+    // even though it is bigger than the real hand silhouette.
+    for (int y = 30; y <= 150; ++y) {
+        for (int x = 8; x <= 120; ++x) {
+            mark(appearance, x, y);
+        }
+    }
 
-    const auto tip = touchplus::tracking::distal_tip_from_top_v4(
-        samples,
-        segmented.selected_mask,
-        touchplus::depth::kDepthWidth,
-        touchplus::depth::kDepthHeight);
+    const auto tip = touchplus::tracking::analyze_appearance_silhouette_v5(
+        appearance, core, width, height);
 
-    const bool background_static_rejected = !touchplus::tracking::foreground_against_background_v4(
-        40, 40.2, 20, 55.0, 40.0);
-    const bool background_closer_accepted = touchplus::tracking::foreground_against_background_v4(
-        44, 40.0, 20, 55.0, 4.0);
-    const bool fallback_weak_rejected = !touchplus::tracking::foreground_against_background_v4(
-        44, 0.0, 0, 20.0, 40.0);
-    const bool fallback_strong_accepted = touchplus::tracking::foreground_against_background_v4(
-        44, 0.0, 0, 42.0, 22.0);
-    const bool top_entry = touchplus::tracking::top_entry_component_v4(
-        segmented.selected_mask,
-        touchplus::depth::kDepthWidth,
-        touchplus::depth::kDepthHeight);
+    // No-hand regression: an 11x9 changed patch is below the physical hand
+    // minimum and must not become a valid component.
+    std::vector<uint8_t> noise(cells, 0);
+    std::vector<uint8_t> noise_core(cells, 0);
+    for (int y = 20; y < 29; ++y) {
+        for (int x = 150; x < 161; ++x) {
+            mark(noise, x, y);
+            if ((x + y) % 2 == 0) mark(noise_core, x, y);
+        }
+    }
+    const auto noise_tip =
+        touchplus::tracking::analyze_appearance_silhouette_v5(
+            noise, noise_core, width, height);
 
-    std::cout << "TouchPlus Phase 2B.4 background-gated distal fingertip self-test\n"
-              << "foreground samples      : " << segmented.foreground_samples << "\n"
-              << "selected hand           : " << segmented.component_samples << "\n"
-              << "distal tip grid         : " << tip.gx << "," << tip.gy << "\n"
-              << "geodesic steps          : " << tip.geodesic_steps << "\n"
-              << "candidate H             : " << tip.sample.surface.h_mm << " mm\n"
-              << "static background reject: " << background_static_rejected << "\n"
-              << "closer foreground accept: " << background_closer_accepted << "\n"
-              << "fallback weak reject    : " << fallback_weak_rejected << "\n"
-              << "fallback strong accept  : " << fallback_strong_accepted << "\n"
-              << "top-entry component     : " << top_entry << "\n";
+    const bool static_background_rejected =
+        !touchplus::tracking::foreground_against_background_v4(
+            40, 40.2, 20, 55.0, 40.0);
+    const bool closer_foreground_accepted =
+        touchplus::tracking::foreground_against_background_v4(
+            44, 40.0, 20, 55.0, 4.0);
 
-    const bool pass = segmented.valid &&
-        segmented.component_samples > 1000 && segmented.component_samples < 8000 &&
+    std::cout
+        << "TouchPlus Phase 2B.5 appearance-silhouette fingertip self-test\n"
+        << "silhouette cells       : " << tip.silhouette_cells << "\n"
+        << "depth core cells       : " << tip.depth_core_cells << "\n"
+        << "silhouette tip grid    : " << tip.gx << "," << tip.gy << "\n"
+        << "geodesic steps         : " << tip.geodesic_steps << "\n"
+        << "small noise rejected   : " << (!noise_tip.valid) << "\n"
+        << "static bg rejected     : " << static_background_rejected << "\n"
+        << "closer fg accepted     : " << closer_foreground_accepted << "\n";
+
+    const bool pass =
         tip.valid &&
+        tip.silhouette_cells > 1000 &&
+        tip.depth_core_cells > 200 &&
         tip.gx >= 154 && tip.gx <= 166 &&
-        tip.gy >= 180 &&
-        tip.sample.surface.h_mm <= 28.0 &&
-        tip.geodesic_steps >= 80 &&
-        background_static_rejected &&
-        background_closer_accepted &&
-        fallback_weak_rejected &&
-        fallback_strong_accepted &&
-        top_entry;
+        tip.gy >= 184 &&
+        tip.geodesic_steps >= 90 &&
+        !noise_tip.valid &&
+        static_background_rejected &&
+        closer_foreground_accepted;
 
     if (!pass) {
-        std::cerr << "PHASE 2B.4 BACKGROUND-GATED DISTAL FINGERTIP SELF-TEST: FAIL\n";
+        std::cerr
+            << "PHASE 2B.5 APPEARANCE-SILHOUETTE FINGERTIP SELF-TEST: FAIL\n";
         return 1;
     }
 
-    std::cout << "PHASE 2B.4 BACKGROUND-GATED DISTAL FINGERTIP SELF-TEST: PASS\n";
+    std::cout
+        << "PHASE 2B.5 APPEARANCE-SILHOUETTE FINGERTIP SELF-TEST: PASS\n";
     return 0;
 }
