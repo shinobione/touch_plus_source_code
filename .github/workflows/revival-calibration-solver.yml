@@ -1,0 +1,37 @@
+name: Revival Calibration Solver
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "revival/phase1b2b-calibration-solver"
+    paths:
+      - "revival/tools/touchplus-calibration-solver.py"
+      - "revival/notes/phase1b2b-calibration-solver.md"
+      - ".github/workflows/revival-calibration-solver.yml"
+  pull_request:
+    paths:
+      - "revival/tools/touchplus-calibration-solver.py"
+      - "revival/notes/phase1b2b-calibration-solver.md"
+      - ".github/workflows/revival-calibration-solver.yml"
+
+jobs:
+  solver-sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install solver dependencies
+        run: python -m pip install --upgrade pip numpy opencv-python-headless
+
+      - name: Compile solver
+        run: python -m py_compile revival/tools/touchplus-calibration-solver.py
+
+      - name: Exercise CLI
+        run: python revival/tools/touchplus-calibration-solver.py --help
