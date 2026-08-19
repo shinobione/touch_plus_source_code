@@ -1,74 +1,53 @@
-# TouchPlus Revival — Phase 2B.1 geometry-first hand / fingertip 3D
+# Phase 2B — Hand / Fingertip 3D
+
+## Current slice: Phase 2B.3 — geodesic fingertip identity
 
 Physical unit: `0101007379`.
 
-## Goal
+Phase 2A proved that the accepted surface frame is physically useful on the real Touch+: the bare work surface measures near `H=0`, while a 53 mm book measured about 54–55 mm. Phase 2B adds the first automatic single-hand / fingertip layer on top of that accepted metric stack.
 
-Build the first automatic hand/fingertip layer on top of the already physically validated stereo calibration, live depth runtime and working-surface frame.
+### What the physical smokes established
 
-This slice deliberately does **not** implement touch/click yet. It only proves that a hand above the fitted work plane can be isolated and that a plausible fingertip candidate can be emitted as `(Xsurface, Ysurface, H)`.
+1. **2B.1 activation / wiring:** tracker runtime, `T` toggle, saved `surface/0101007379.json`, and heartbeat reporting all work on the real device.
+2. **2B.1 foreground blocker:** the first hand smoke produced giant ~19k–26k-cell pseudo-hands. This came from trusting the half-resolution dense depth too aggressively and selecting the largest grown component.
+3. **2B.2 hardened segmentation:** finite surface ROI, `H>=18 mm`, tighter dense cost/uniqueness, local H/disparity consistency, no unconditional 3x3 growth, and implausibly giant/wide component rejection removed the 20k-cell failure. Real selected components are now generally hundreds to a few thousand cells.
+4. **2B.2 real XYZ path:** the hardware run intermittently reached full-resolution robust stereo refinement and emitted finite surface-space fingertip XYZ with MEDIUM/HIGH confidence.
+5. **2B.2 fingertip identity blocker:** video review showed those finite candidates repeatedly landing around the wrist / back-of-hand side. Example real telemetry around the extended-index sequence reported `pixel≈(441–447,83–89)` while the visible distal index was substantially lower in the rectified-left image. The radial-from-centroid extremity scorer was choosing the wrong anatomical endpoint.
 
-## Runtime behavior
+### Phase 2B.3 correction
 
-The existing `touchplus_depth_viewer.exe` stays on the proven persistent capture path. Phase 2B adds a geometry-only tracker on top of the existing half-resolution depth workspace:
+For the canonical Touch+ desk setup, the forearm enters from the **top of the camera image** and the extended index points into the work area. 2B.3 makes that physical setup explicit instead of pretending orientation independence:
 
-- dense points are reprojected through `Q` and transformed into the accepted surface frame;
-- only points with `6 mm <= H <= 260 mm` become foreground candidates;
-- a one-cell spatial bridge helps sparse valid depth samples form components;
-- the largest above-plane component is treated as the current hand candidate;
-- an extremity score favors points far from the component centroid and modestly favors lower `H`, which is useful for an extended pointing finger;
-- the coarse extremity is refined against full-resolution stereo using the hardened NCC + LEFT/RIGHT consistency matcher around the candidate;
-- low-support refinement is reported as `unknown` instead of a finite fingertip;
-- accepted fingertip positions are temporally smoothed, while implausible large one-frame jumps are rejected.
+- keep the accepted 2B.2 hardened foreground segmentation unchanged;
+- treat the selected component's top entry band as a wrist/forearm anchor;
+- walk through only that already-selected component;
+- choose the distal **geodesic** endpoint opposite the wrist, with low-H and boundary thinness only as tie-breakers;
+- robust full-resolution NCC + LEFT↔RIGHT consistency still gates the final finite XYZ;
+- failed refinement still degrades to `unknown`, never a fabricated point;
+- when refinement is unknown, the coarse candidate pixel is still reported and a white diagnostic cross is drawn on the depth heatmap so fingertip identity can be checked visually.
 
-The right-hand depth heatmap is overlaid with the selected hand component and a cross at the accepted fingertip candidate.
+This is deliberately a controlled **single hand + extended index + top-entry forearm** slice. Orientation-independent pose understanding, multiple fingertips and touch/click semantics are later boundaries.
 
-Console telemetry is printed roughly once per second:
+## CI gate
 
-```text
-[TRACK] no above-plane hand candidate | foreground=...
-[TRACK] hand=... cells | fingertip=unknown | refinement=... | confidence=LOW
-[TRACK] hand=... cells | fingertip surface XYZ=(..., ..., H=...) mm | pixel=... | support=... | confidence=MEDIUM/HIGH
-```
+The synthetic regression now includes:
 
-`T` toggles the Phase 2B tracker without changing the underlying depth/surface stack.
+- a top-entry wrist/forearm;
+- a broad palm;
+- one long index extending downward toward the plane;
+- two shorter folded-finger branches;
+- the prior giant false component that is larger than the real hand.
 
-## Important safety boundary
+Phase 2B.3 must first reject the giant distractor, then select the long distal index endpoint geodesically rather than the wrist side. Both x64 and Win32 must pass, followed by the normal Revival Win32 build plus Phase 2A and Phase 1C regressions before packaging.
 
-Phase 2B.1 must never turn missing or weak stereo evidence into a fake fingertip. `unknown` is preferred over a wrong finite point.
+## Physical smoke required before merge
 
-The following remain immutable in this slice:
+1. Preserve the accepted `surface/0101007379.json` and do not move the Touch+ base/hinge.
+2. Start with several seconds of no hand; no persistent finite fingertip is allowed.
+3. Insert one hand from the top of the image with the index clearly extended into the work area.
+4. Check the diagnostic coarse cross even on `fingertip=unknown`: it should sit near the distal index, not the wrist/knuckles.
+5. Move the index slowly left/right, then down/up relative to the work surface.
+6. Finite `fingertip surface XYZ=(X,Y,H)` outputs should stay anatomically attached to the distal index and move continuously; `H` should fall as the fingertip approaches the plane.
+7. Low texture may produce `unknown`; catastrophic or anatomically wrong finite points are blockers.
 
-- per-serial `K/D/R/T/P/Q` camera calibration;
-- the accepted Phase 2A surface transform;
-- persistent Touch+ unlock/capture behavior;
-- Phase 1C hardened cursor-depth matcher.
-
-## Physical smoke
-
-Use the already accepted `surface/0101007379.json`. If testing from a freshly extracted Actions artifact, copy the existing `surface` folder beside the new EXE, or extract the new kit over the existing Phase 2A folder without deleting `surface/`.
-
-1. Keep the Touch+ base and pitch hinge fixed so the saved Phase 2A surface model remains valid.
-2. Clear the work area of books/boxes raised above the plane for this first tracker smoke.
-3. Start `touchplus_depth_viewer.exe` in depth mode.
-4. With no hand present, expect `no above-plane hand candidate` most of the time; isolated noisy pixels must not become a confident fingertip.
-5. Put one hand above the table and extend the index finger clearly away from the palm.
-6. Move the index slowly left/right and toward/away from the surface.
-7. Expect the selected component overlay to follow the hand and the fingertip cross to stay near the distal index region rather than jump randomly to the palm/background.
-8. Console `Xsurface/Ysurface/H` should move continuously with the finger. Lowering the finger toward the table should reduce `H`.
-9. Temporary low texture may produce `fingertip=unknown`; that is acceptable and preferable to a false finite point.
-
-A short 30–60 second screen recording with the heatmap and console visible is enough for the first physical review.
-
-## Acceptance boundary for Phase 2B.1
-
-Do not merge until:
-
-- synthetic component/extremity self-test passes in x64 and Win32;
-- normal Win32 Revival build and Phase 1C/2A regression checks remain green;
-- no-hand smoke does not create persistent confident false fingertips;
-- a single extended hand produces a stable component and fingertip candidate;
-- `(Xsurface, Ysurface, H)` follows deliberate hand motion with the correct direction, especially decreasing `H` as the fingertip approaches the work plane;
-- low-confidence regions degrade to `unknown` rather than catastrophic coordinates.
-
-Touch-down/click thresholds belong to Phase 2C, not this slice.
+**Do not merge PR #9 until fingertip identity passes on the real Touch+.**
