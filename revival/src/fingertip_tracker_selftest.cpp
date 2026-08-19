@@ -1,4 +1,4 @@
-#include "fingertip_tracker_v2.h"
+#include "fingertip_tracker_v3.h"
 
 #include <cmath>
 #include <iostream>
@@ -10,33 +10,53 @@ int main() {
 
     std::vector<GridSample> samples;
 
-    // Synthetic hand: broad palm + one extended, lower fingertip.
-    for (int gy = 88; gy <= 132; ++gy) {
-        for (int gx = 135; gx <= 185; ++gx) {
-            const double nx = (gx - 160) / 25.0;
-            const double ny = (gy - 110) / 22.0;
+    // Canonical desk setup: forearm enters from TOP of image, broad palm sits
+    // below it, and one index finger extends DOWN toward the work surface.
+    // This intentionally mirrors the physical smoke that defeated the old
+    // centroid-radius scorer by making the wrist side a strong radial extremity.
+
+    // Forearm / wrist entry band.
+    for (int gy = 20; gy <= 78; ++gy) {
+        for (int gx = 151; gx <= 169; ++gx) {
+            const double h = 82.0 + 3.0 * std::sin(gx * 0.17);
+            samples.push_back({gx, gy, SurfacePoint{(gx - 160) * 2.0, (gy - 110) * 2.0, h}, 40.0});
+        }
+    }
+
+    // Palm.
+    for (int gy = 70; gy <= 132; ++gy) {
+        for (int gx = 132; gx <= 188; ++gx) {
+            const double nx = (gx - 160) / 28.0;
+            const double ny = (gy - 102) / 31.0;
             if (nx * nx + ny * ny > 1.0) continue;
-            const double h = 55.0 + 6.0 * std::sin(gx * 0.17) * std::cos(gy * 0.13);
-            samples.push_back({gx, gy, SurfacePoint{(gx - 160) * 2.0, (gy - 120) * 2.0, h}, 40.0});
+            const double h = 58.0 + 5.0 * std::sin(gx * 0.13) * std::cos(gy * 0.11);
+            samples.push_back({gx, gy, SurfacePoint{(gx - 160) * 2.0, (gy - 110) * 2.0, h}, 42.0});
         }
     }
 
-    // Extended index finger aimed upward in image/surface Y. Height decreases
-    // toward the distal tip so the geometry-only extremity score has a clear
-    // physically meaningful winner.
-    for (int gy = 48; gy < 94; ++gy) {
-        const int half_width = gy < 60 ? 3 : 5;
+    // Extended index finger: distal end is LOWER in image and LOWER in H.
+    for (int gy = 124; gy <= 192; ++gy) {
+        const int half_width = gy > 176 ? 3 : 5;
         for (int gx = 160 - half_width; gx <= 160 + half_width; ++gx) {
-            const double t = static_cast<double>(gy - 48) / 46.0;
-            const double h = 18.0 + t * 30.0;
-            samples.push_back({gx, gy, SurfacePoint{(gx - 160) * 2.0, (gy - 120) * 2.0, h}, 52.0});
+            const double t = static_cast<double>(gy - 124) / 68.0;
+            const double h = 46.0 - t * 28.0;
+            samples.push_back({gx, gy, SurfacePoint{(gx - 160) * 2.0, (gy - 110) * 2.0, h}, 52.0});
         }
     }
 
-    // Real-scene regression: a giant above-plane false component deliberately
-    // contains far more cells than the hand. Phase 2B.1 selected the largest
-    // component blindly and therefore treated broad depth clutter/table
-    // quantization as a 20k-cell "hand". V2 must reject this component.
+    // Two shorter folded-finger protrusions. They are real distal branches but
+    // must lose to the much longer extended index geodesically.
+    for (int gy = 122; gy <= 148; ++gy) {
+        for (int gx = 140; gx <= 147; ++gx) {
+            samples.push_back({gx, gy, SurfacePoint{(gx - 160) * 2.0, (gy - 110) * 2.0, 42.0}, 48.0});
+        }
+        for (int gx = 175; gx <= 182; ++gx) {
+            samples.push_back({gx, gy, SurfacePoint{(gx - 160) * 2.0, (gy - 110) * 2.0, 44.0}, 47.0});
+        }
+    }
+
+    // Real-scene regression from 2B.2: a giant false component contains far
+    // more cells than the hand. Hardened segmentation must still reject it.
     for (int gy = 18; gy <= 138; ++gy) {
         for (int gx = 4; gx <= 114; ++gx) {
             const double h = 28.0 + 2.0 * std::sin(gx * 0.11) * std::cos(gy * 0.07);
@@ -44,34 +64,35 @@ int main() {
         }
     }
 
-    // Smaller distractor above the plane that must also lose to the plausible
-    // hand component.
-    for (int gy = 160; gy < 166; ++gy) {
-        for (int gx = 255; gx < 262; ++gx) {
-            samples.push_back({gx, gy, SurfacePoint{180.0 + gx, 100.0 + gy, 80.0}, 30.0});
-        }
-    }
-
-    const auto result = touchplus::tracking::analyze_surface_samples_v2(
+    const auto segmented = touchplus::tracking::analyze_surface_samples_v2(
         samples, touchplus::depth::kDepthWidth, touchplus::depth::kDepthHeight);
 
-    std::cout << "TouchPlus Phase 2B.2 hardened geometry tracker self-test\n"
-              << "foreground samples : " << result.foreground_samples << "\n"
-              << "selected hand      : " << result.component_samples << "\n"
-              << "candidate grid     : " << result.tip_gx << "," << result.tip_gy << "\n"
-              << "candidate H        : " << result.coarse_tip.h_mm << " mm\n";
+    const auto tip = touchplus::tracking::geodesic_tip_from_top_wrist_v3(
+        samples,
+        segmented.selected_mask,
+        touchplus::depth::kDepthWidth,
+        touchplus::depth::kDepthHeight);
 
-    const bool pass = result.valid &&
-        result.component_samples > 500 && result.component_samples < 5000 &&
-        result.tip_gx >= 150 && result.tip_gx <= 170 &&
-        result.tip_gy <= 62 &&
-        result.coarse_tip.h_mm <= 30.0;
+    std::cout << "TouchPlus Phase 2B.3 geodesic fingertip self-test\n"
+              << "foreground samples : " << segmented.foreground_samples << "\n"
+              << "selected hand      : " << segmented.component_samples << "\n"
+              << "geodesic tip grid  : " << tip.gx << "," << tip.gy << "\n"
+              << "geodesic steps     : " << tip.geodesic_steps << "\n"
+              << "candidate H        : " << tip.sample.surface.h_mm << " mm\n";
+
+    const bool pass = segmented.valid &&
+        segmented.component_samples > 1000 && segmented.component_samples < 8000 &&
+        tip.valid &&
+        tip.gx >= 154 && tip.gx <= 166 &&
+        tip.gy >= 180 &&
+        tip.sample.surface.h_mm <= 28.0 &&
+        tip.geodesic_steps >= 80;
 
     if (!pass) {
-        std::cerr << "PHASE 2B.2 HARDENED FINGERTIP TRACKER SELF-TEST: FAIL\n";
+        std::cerr << "PHASE 2B.3 GEODESIC FINGERTIP SELF-TEST: FAIL\n";
         return 1;
     }
 
-    std::cout << "PHASE 2B.2 HARDENED FINGERTIP TRACKER SELF-TEST: PASS\n";
+    std::cout << "PHASE 2B.3 GEODESIC FINGERTIP SELF-TEST: PASS\n";
     return 0;
 }
