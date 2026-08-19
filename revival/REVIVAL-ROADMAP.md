@@ -1,33 +1,33 @@
 # TouchPlus Revival — canonical roadmap / handoff
 
-Last updated: **2026-08-19 15:45 CEST**
+Last updated: **2026-08-19 16:55 CEST**
 
-This file is the canonical resume point for the TouchPlus Revival work. If a new ChatGPT/Codex session starts, read this file first, then inspect the active PR/branch named below before changing code.
+This file is the canonical resume point for TouchPlus Revival. Read it first in a new ChatGPT/Codex session, then inspect the active PR/branch before changing code.
 
 ## 0. Project intent
 
-Revive the abandoned Ractiv Touch+ hardware as a modern stereo/3D input device, without trying to resurrect the complete original 2015 UI stack.
+Revive the abandoned Ractiv Touch+ hardware as a modern stereo/3D input device without trying to resurrect the complete original 2015 UI stack.
 
 Preferred direction: **Option B — modern runtime around the original hardware**.
 
-Keep/use only what is valuable from Ractiv:
+Keep/use what is valuable from Ractiv:
 
 - USB / Etron control and software unlock;
 - stereo camera access;
 - IMU / accelerometer access;
-- sensor controls (exposure, gain, LEDs, etc.);
-- geometry/calibration knowledge;
-- any useful historical tracking ideas.
+- exposure, gain and LEDs;
+- calibration / geometry knowledge;
+- useful historical tracking ideas.
 
 Build a modern pipeline on top:
 
 - persistent stereo capture;
-- local calibration / rectification;
+- local metric calibration / rectification;
 - disparity and metric depth;
 - modern hand / finger / pointer tracking;
-- eventually mouse/touch/gesture/OSC/MIDI/Unity style outputs.
+- mouse/touch/gesture/OSC/MIDI/Unity-style outputs.
 
-Do **not** rewrite the historical snapshot in-place. Revival code lives under `revival/` and the canonical integration branch is `revival/main`.
+Do not rewrite the historical snapshot in-place. Revival code lives under `revival/`; the canonical integration branch is `revival/main`.
 
 ---
 
@@ -39,36 +39,45 @@ Canonical Revival base branch: `revival/main`
 
 ### Completed slices
 
-- **Phase 0 — Hardware Probe / Atomic Capture**: merged into `revival/main`.
+- **Phase 0 — Hardware Probe / Atomic Capture**: merged.
   - physical Touch+ detected;
-  - vendor control works;
-  - software unlock works;
+  - vendor control + software unlock work;
   - IMU works;
-  - live video works;
-  - stereo 1280x480 frame splits into two real 640x480 eyes.
+  - live stereo video works;
+  - 1280x480 frame splits into two real 640x480 eyes.
 
-- **Phase 1A — Stable Stereo Viewer**: merged into `revival/main`.
+- **Phase 1A — Stable Stereo Viewer**: merged.
   - persistent LEFT/RIGHT viewer;
   - GDI flicker fixed with back-buffering;
-  - historical Ractiv vertical flip reproduced so images are upright;
+  - historical Ractiv vertical flip reproduced;
   - measured physical cadence documented as ~30 fps.
 
-- **Phase 1B.1 — Factory calibration identity recovery**: merged into `revival/main`.
-  - device serial recovered from Touch+ flash;
+- **Phase 1B.1 — Factory calibration identity recovery**: merged.
+  - device serial recovered from flash;
   - historical cloud key derived;
-  - old factory-calibration CDN checked and found unavailable.
+  - old factory-calibration CDN confirmed unavailable.
+
+- **Phase 1B.2a — Persistent live stereo calibration capture**: merged via PR #4 on **2026-08-19**.
+  - accepted implementation: `touchplus_calibration_capture.exe`;
+  - one Etron unlock, one persistent stream;
+  - persistent LEFT/RIGHT preview;
+  - SPACE saves synchronized pairs without reopening the camera;
+  - gray/uniform guard;
+  - captured PNGs already use canonical upright orientation;
+  - physical 3-pair smoke PASS;
+  - follow-up 20-pose dataset captured successfully.
 
 ### Active slice
 
-**PR #4 — `Phase 1B.2a — guided local stereo calibration capture`**
+**Phase 1B.2b — local metric calibration solver**
 
-- PR: `#4`
-- base: `revival/main`
-- head branch: `revival/phase1b2-local-calibration`
-- current known head at handoff: `7864ee02ce5eb84ce927dbbd1fa76f829a3ae856`
-- PR is intentionally **Draft** until the physical calibration-capture smoke passes.
+- branch: `revival/phase1b2b-calibration-solver`
+- solver: `revival/tools/touchplus-calibration-solver.py`
+- notes: `revival/notes/phase1b2b-calibration-solver.md`
+- CI: `.github/workflows/revival-calibration-solver.yml`
+- expected PR: **#5** once opened.
 
-Important: the PR description may still contain language from the first PowerShell one-shot approach. The branch code has moved to a **persistent live calibration capture executable**; inspect the branch files, not only the old PR wording.
+The active goal is to make the successful calibration reproducible and auditable, not merely keep matrices produced inside one chat session.
 
 ---
 
@@ -78,77 +87,57 @@ Physical unit under test:
 
 - USB identity: `VID_1E4E / PID_0107`
 - camera friendly name: `Touch+ Camera`
-- sensor type used by Ractiv/Etron layer: `OV7740`
+- historical sensor type: `OV7740`
 - recovered Ractiv serial: **`0101007379`**
 - historical factory cloud key: **`7379`**
 
-### Vendor / control path
-
-Confirmed on the real hardware:
+Confirmed vendor/control behavior:
 
 - `EtronDI_Init` works;
-- `eSPAEAWB_EnumDevice` sees both the user's UGREEN camera and Touch+;
+- `eSPAEAWB_EnumDevice` sees Touch+;
 - `eSPAEAWB_SelectDevice` works;
 - `eSPAEAWB_SetSensorType(OV7740)` works;
 - `eSPAEAWB_SWUnlock(0x0107)` works;
-- accelerometer values are returned and vary physically;
+- accelerometer values are real and change physically;
 - exposure / gain / GPIO / LED calls succeed;
-- the recovered Ractiv legacy initializer succeeds completely.
+- recovered Ractiv LegacyInit succeeds completely.
 
-Critical behavior: the Touch+ video state is effectively session-sensitive. A reliable runtime must **unlock first and open/keep the video stream in the same controlled flow**. Opening/switching cameras through Windows Camera can make Touch+ return to a gray stream until it is unlocked again.
+Critical runtime behavior: video state is session-sensitive. Reliable code must **unlock first and keep the stream open in the same controlled flow**. Reopening/switching camera clients can return the Touch+ to a gray stream until it is unlocked again.
 
-### Stereo video path
-
-Confirmed on the physical device:
+Stereo video facts:
 
 - native mode advertises `1280x480 @ 60 fps MJPG`;
-- one frame contains two physical camera views side-by-side;
 - LEFT = 640x480;
 - RIGHT = 640x480;
-- the two eyes show real parallax and are not duplicated crops;
-- persistent live viewing is stable after the anti-flicker fix;
-- historical Ractiv vertical flip is required to make the scene upright while preserving horizontal stereo identity.
+- two real physical views with parallax;
+- persistent live viewing is stable;
+- historical vertical flip is required for canonical upright orientation.
 
 ### 60 fps investigation — CLOSED FOR NOW
 
-Do not reopen this investigation unless a later phase actually needs more speed.
+Measured on the physical device:
 
-Measured repeatedly on the real device:
+- Media Foundation raw MJPEG: ~29.9 samples/s;
+- median timestamp interval: ~32 ms;
+- DirectShow forced to 60: ~30.6 callbacks/s;
+- DirectShow + full recovered sensor initializer: ~30.7 callbacks/s.
 
-- Media Foundation raw MJPEG path: about **29.9 samples/s**;
-- median frame timestamp: about **32 ms**;
-- DirectShow `IAMStreamConfig`, forcing `AvgTimePerFrame = 1e7/60`: still about **30.6 callbacks/s**;
-- DirectShow + full recovered Ractiv sensor initializer (AE/AWB off, LEDs, exposure 15 ms, gains): still about **30.7 callbacks/s**.
-
-Therefore:
-
-- `60 fps` is advertised / negotiated;
-- physical delivery on this unit/firmware/driver path is ~30 fps;
-- this is **not** a viewer/GDI/RGB conversion bottleneck.
-
-Baseline for Revival: **stable stereo ~30 fps**.
+Therefore `60 fps` is advertised/negotiated but physical delivery on this unit/driver path is ~30 fps. Accepted Revival baseline: **stable stereo ~30 fps**.
 
 ---
 
-## 3. Factory calibration recovery — result
+## 3. Factory calibration recovery — CLOSED
 
-The real Touch+ flash returned 10 bytes:
+Flash identity:
 
-- decimal: `0,1,0,1,0,0,7,3,7,9`
-- hex: `00 01 00 01 00 00 07 03 07 09`
+- raw decimal: `0,1,0,1,0,0,7,3,7,9`
+- raw hex: `00 01 00 01 00 00 07 03 07 09`
 - Ractiv serial: `0101007379`
-- historical cloud key: `7379`
+- cloud key: `7379`
 
-Ractiv historically looked for per-device assets such as:
+Historical assets (`0.jpg`, `1.jpg`, `stereoCalibData.txt`, later `rect0.txt` / `rect1.txt`) are no longer recoverable because the old CloudFront hostname is dead.
 
-- `0.jpg`
-- `1.jpg`
-- `stereoCalibData.txt`
-- later-derived rectification data (`rect0.txt`, `rect1.txt`)
-
-The old CloudFront hostname no longer resolves in either HTTP or HTTPS, so **factory calibration recovery is unavailable**. This path is closed.
-
-Canonical fallback: **new local metric stereo calibration of the real unit**.
+Canonical fallback is the new local metric stereo calibration.
 
 ---
 
@@ -156,229 +145,188 @@ Canonical fallback: **new local metric stereo calibration of the real unit**.
 
 Target geometry:
 
-- checkerboard: 10 x 7 printed squares;
-- OpenCV-style inner corners: **9 x 6**;
+- 10 x 7 printed squares;
+- **9 x 6 inner corners**;
 - square size: **25.0 mm**;
-- printed board size: 250 x 175 mm;
-- A4 landscape, printed at Actual Size / 100%.
+- board size: 250 x 175 mm;
+- A4 landscape at Actual Size / 100%.
 
-A PDF version was produced for the user's printer because the printer workflow did not accept SVG directly.
+The printed 100 mm reference bar was physically measured by the user and is **exactly 100 mm**. Metric target scale is accepted.
 
-Physical validation already done by user:
-
-- printed 100 mm reference bar measured with a ruler;
-- result: **exactly 100 mm**.
-
-Therefore the printed target scale is accepted for metric calibration.
-
-Do not ask the user to reprint the board unless a later solver proves the geometry impossible.
+Do not ask for a reprint unless a later physical depth check proves the scale wrong.
 
 ---
 
-## 5. IMPORTANT: first calibration capture workflow is deprecated
+## 5. Deprecated calibration capture path — DO NOT REUSE
 
-The first Phase 1B.2a approach used `touchplus-calibration-capture.ps1` around repeated runs of `touchplus_atomic_probe.exe`.
+The original helper `touchplus-calibration-capture.ps1` around repeated one-shot `touchplus_atomic_probe.exe` runs is deprecated.
 
-Physical smoke exposed two problems:
+Physical smoke showed:
 
-1. the script rejected `-Pairs 3` because it hard-coded a minimum of 8, even though a 3-pair smoke was desired;
-2. more importantly, it had no true live stereo preview and repeatedly reopened the Touch+ for one-shot captures; the user observed gray/unusable output.
+1. an incorrect minimum-8 guard blocked a 3-pair smoke;
+2. no real live preview;
+3. repeated camera open/close produced gray/unusable output.
 
-Treat this as a **workflow design failure**, not a target/camera failure.
+This was a workflow design failure, not a target/camera failure.
 
-Do not continue collecting calibration data with the repeated one-shot PowerShell loop.
+Never return to the repeated PowerShell one-shot loop for calibration collection.
 
 ---
 
-## 6. Current active implementation: persistent live calibration capture
+## 6. Phase 1B.2a — accepted persistent capture
 
-The active branch now contains a dedicated executable:
-
-`revival/src/calibration_capture.cpp`
-
-Target executable:
+Canonical capture executable:
 
 `touchplus_calibration_capture.exe`
 
-Design:
+Behavior:
 
 1. Etron unlock once;
 2. open Touch+ stereo stream once;
 3. keep stream open continuously;
-4. show persistent live LEFT / RIGHT preview;
-5. apply the historical Ractiv vertical flip in the live/captured frame path;
-6. press **SPACE** to save the current synchronized stereo frame;
-7. reject nearly uniform/gray frames before saving;
-8. continue to the next pose without closing the camera;
-9. **Q / ESC** quits.
+4. show persistent LEFT / RIGHT preview;
+5. apply historical Ractiv vertical flip;
+6. SPACE saves the current synchronized stereo frame;
+7. reject nearly uniform/gray frames;
+8. continue without camera reopen;
+9. Q / ESC quits.
 
-The executable accepts small smoke counts, including:
+### Physical 3-pair smoke — PASS
 
-```powershell
-.\touchplus_calibration_capture.exe --pairs 3
-```
+Real device `0101007379` produced three synchronized poses. All six LEFT/RIGHT images:
 
-Expected smoke behavior:
+- were non-gray and usable;
+- had the complete useful 9x6 inner-corner grid;
+- produced **54/54 detected corners per eye**;
+- showed real stereo parallax;
+- produced a coherent smoke-scale baseline around 60 mm and sub-pixel rectified vertical error.
 
-- LEFT and RIGHT live video must be visible before any capture;
-- no flicker;
-- no gray stream;
-- SPACE saves pair 001, 002, 003;
-- saved eye PNGs are upright;
-- each pose shows the full checkerboard in both eyes.
+PR #4 was then accepted and merged.
 
-Expected output layout:
+### Full dataset — CAPTURED
 
-```text
-calibration-captures/
-  0101007379/
-    raw/
-      pair-001-full.png
-      pair-001-left.png
-      pair-001-right.png
-      pair-001.json
-      pair-002-...
-      pair-003-...
-```
+A follow-up **20-pose** dataset was captured in one persistent session.
 
-### Packaging / artifact rule
+- 20 synchronized stereo pairs;
+- 40 eye images;
+- all **20/20 pairs** yield complete 9x6 corner detection in both eyes.
 
-**Do not rely on ChatGPT `sandbox:/...` links across chat sessions.** Those links can expire with the code-interpreter/session runtime.
-
-Instead, in a new chat:
-
-1. inspect PR #4 / branch `revival/phase1b2-local-calibration`;
-2. inspect the latest successful `Revival Calibration Capture Kit` GitHub Actions run for that branch/head;
-3. download the GitHub Actions artifact named:
-   - `touchplus-phase1b2-calibration-capture-kit`
-4. verify that the artifact contains `touchplus_calibration_capture.exe` plus the Etron DLLs and calibration target/docs;
-5. give the user a fresh downloadable artifact link/file if needed.
-
-At the time of this handoff, the latest known packaging CI for the persistent live capture executable had passed successfully.
+The source dataset remains the evidence set. Do not silently delete difficult poses.
 
 ---
 
-## 7. NEXT ACTION — exact continuation point
+## 7. Phase 1B.2b — solver implementation and real result
 
-This is the immediate canonical action in the next chat.
+Canonical solver:
 
-### Step A — refresh PR #4 / artifact
-
-Read:
-
-- this roadmap;
-- PR #4;
-- current head of `revival/phase1b2-local-calibration`;
-- latest GitHub Actions runs/artifacts for that head.
-
-If necessary, update the PR description so it no longer presents the deprecated repeated one-shot PowerShell loop as the preferred workflow.
-
-### Step B — give user the current live-capture kit
-
-Use the latest successful GitHub Actions artifact, **not an old sandbox link**.
-
-### Step C — physical 3-pair smoke
-
-User runs:
-
-```powershell
-.\touchplus_calibration_capture.exe --pairs 3
+```text
+revival/tools/touchplus-calibration-solver.py
 ```
+
+Input can be either the capture directory or a ZIP of the captured dataset.
+
+Solver outputs:
+
+- `K1`, `D1`, `K2`, `D2`;
+- stereo `R` and metric `T_mm`;
+- `E`, `F`;
+- `R1`, `R2`;
+- `P1`, `P2`;
+- `Q`;
+- per-pair detection and reprojection diagnostics;
+- robust outlier selection report;
+- rectified preview composites with horizontal guide lines;
+- JSON calibration bundle;
+- OpenCV YAML bundle;
+- solved ZIP archive.
+
+### Robust outlier policy
+
+The solver first calibrates all complete detected pairs, then scores each pair from combined LEFT/RIGHT mono reprojection RMSE.
+
+Gross outlier threshold:
+
+`median + 2.5 × robust MAD sigma`
+
+Outliers are documented and excluded from the final solve; they are **not deleted** from the original dataset.
+
+### Real 20-pose solve — PASS
+
+On the user's physical 20-pose dataset:
+
+- input pairs: **20**
+- full corner-detected pairs: **20**
+- accepted final pairs: **17**
+- robust outliers: **016, 017, 018**
+- robust threshold: **1.0305 px**
+
+Final accepted-set metrics:
+
+- mono RMS LEFT: **0.3472 px**
+- mono RMS RIGHT: **0.3912 px**
+- stereo RMS: **0.3799 px**
+- recovered stereo baseline: **59.953 mm**
+- rectified vertical epipolar mean: **0.1195 px**
+- rectified vertical epipolar p95: **0.3096 px**
+- rectified vertical epipolar max: **1.2763 px**
+
+Numeric solver acceptance: **PASS**.
+
+Important: numeric PASS is not by itself permission to install calibration into the live runtime.
+
+---
+
+## 8. NEXT ACTION — exact continuation point
+
+### Step A — finish Phase 1B.2b PR / CI
+
+Inspect the active solver branch and PR #5:
+
+- verify solver CI (`py_compile` + dependency import + CLI smoke) is green;
+- inspect changed files;
+- keep the real 20-pose result documented;
+- do not commit the user's raw 20-pose photo dataset into the public repo.
+
+### Step B — visually accept rectification
+
+Use the solver-produced rectified previews from the user's real dataset.
 
 Acceptance:
 
-- persistent LEFT/RIGHT live preview appears;
-- both eyes show non-gray real video;
-- checkerboard can be positioned while preview remains live;
-- three captures save successfully with SPACE;
-- no camera close/reopen between pairs;
-- six eye PNGs (`3 x left/right`) are visually usable.
+- matching checkerboard corners/features in LEFT/RIGHT align horizontally;
+- no gross warping or eye swap;
+- no orientation reversal;
+- useful image field remains after rectification.
 
-Suggested smoke poses:
+### Step C — first metric depth validation
 
-1. board front-facing and centered;
-2. board moderately yawed left;
-3. board moderately yawed right.
+Before runtime integration, build/run a small disparity/depth diagnostic using the accepted bundle:
 
-Keep the complete checkerboard visible in both eyes.
+1. rectify a synchronized pair;
+2. compute disparity (StereoSGBM is acceptable as first baseline);
+3. reproject with `Q`;
+4. verify nearer objects produce smaller Z than farther objects;
+5. measure a few known distances with ruler/tape and compare estimated Z.
 
-### Step D — inspect the 3-pair dataset
-
-User should upload either:
-
-- the six eye PNGs, or
-- a ZIP of the 3-pair dataset.
-
-Check:
-
-- focus / blur;
-- exposure / contrast;
-- full checkerboard visibility in both eyes;
-- non-duplicate poses;
-- real left/right parallax;
-- no gray frames;
-- orientation consistency.
-
-If the 3-pair smoke passes, collect **18–25 diverse clean pairs** using the same persistent session.
-
----
-
-## 8. Phase 1B.2b — solver (next code slice after dataset)
-
-Once a clean dataset exists, build the local calibration solver.
-
-Input:
-
-- LEFT/RIGHT 640x480 synchronized pairs;
-- checkerboard 9x6 inner corners;
-- square size 25.0 mm;
-- already-upright persistent-capture images.
-
-Required outputs:
-
-- camera matrix `K1` / `K2`;
-- distortion coefficients `D1` / `D2`;
-- stereo rotation `R`;
-- stereo translation `T` in millimetres;
-- essential/fundamental matrices if useful (`E`, `F`);
-- rectification transforms `R1`, `R2`;
-- projection matrices `P1`, `P2`;
-- disparity-to-depth reprojection matrix `Q`;
-- per-pair corner detection result;
-- mono reprojection RMS;
-- stereo calibration RMS;
-- rectified epipolar vertical-error statistics;
-- rectified preview images with horizontal guide lines;
-- machine-readable calibration bundle versioned by device serial `0101007379`.
-
-Acceptance before runtime integration:
-
-- corner detection succeeds on most/all selected pairs;
-- no gross outlier poses;
-- reprojection error is reasonable and stable;
-- rectified left/right features align horizontally;
-- computed baseline / geometry is physically plausible;
-- a simple disparity/depth demo gives coherent near/far behavior.
-
-Do not install calibration into the runtime solely because OpenCV returns a matrix; review metrics and previews first.
+Only after physical depth sanity passes should the calibration be promoted into the runtime.
 
 ---
 
 ## 9. Phase 1C — rectified stereo + metric depth
 
-After solver acceptance:
+After calibration acceptance:
 
-- load calibration by serial;
+- load calibration by serial `0101007379`;
 - rectify live LEFT/RIGHT frames;
-- implement/test disparity (start with OpenCV StereoSGBM or equivalent); 
+- implement/test disparity;
 - convert disparity to metric depth via `Q`;
-- add live diagnostic modes:
+- add diagnostics:
   - raw stereo;
   - rectified stereo;
   - disparity;
-  - depth heat/gray visualization;
+  - depth visualization;
   - point-depth readout under cursor;
-- verify known-distance objects with a tape/ruler.
+- verify known-distance objects physically.
 
 Goal: stable metric Z estimates in the useful Touch+ working volume.
 
@@ -386,7 +334,7 @@ Goal: stable metric Z estimates in the useful Touch+ working volume.
 
 ## 10. Phase 2 — modern tracking core
 
-Only after stereo geometry is trustworthy.
+Only after stereo geometry is physically trustworthy.
 
 Incremental targets:
 
@@ -405,7 +353,7 @@ Do not begin with a giant AI model unless geometry proves insufficient. First ex
 
 ## 11. Phase 3 — useful runtime outputs
 
-Potential outputs once 3D tracking is stable:
+Potential outputs:
 
 - Windows mouse pointer;
 - virtual touch / click plane;
@@ -416,33 +364,32 @@ Potential outputs once 3D tracking is stable:
 - custom app integrations;
 - debug telemetry / recording.
 
-The original Ractiv code already contained pointer mapping, UDP IPC, pinch logic and a Unity-style tool mode, so those ideas can be reused conceptually without reviving the old UI wholesale.
+Historical Ractiv code already contained pointer mapping, UDP IPC, pinch logic and a Unity-style tool mode; these can be reused conceptually without reviving the old UI wholesale.
 
 ---
 
 ## 12. Known technical constraints
 
-- recovered Etron DLL stack is Win32 / 32-bit;
-- modern Revival executables that link the old vendor-control SDK therefore use Win32 builds;
-- Etron may initialize COM internally, so COM apartment conflicts must be handled carefully (Phase 0C already introduced compatibility handling where needed);
-- Windows Camera is useful only as a diagnostic; do not make it part of the runtime;
-- the Touch+ must be software-unlocked before useful video;
-- switching/reopening camera clients can return the device to gray state;
-- advertised `@60` does not mean measured 60 fps on the real hardware;
-- current accepted physical baseline is ~30 fps stereo.
+- historical Etron DLL stack is Win32 / 32-bit;
+- Revival executables that link the vendor-control SDK use Win32 builds;
+- Etron can initialize COM internally, so apartment conflicts need compatibility handling;
+- Windows Camera is diagnostic only, never part of runtime;
+- software unlock is required before useful video;
+- switching/reopening clients can return a gray stream;
+- advertised 60 fps is not measured physical 60 fps on the real unit;
+- accepted physical baseline is ~30 fps stereo;
+- raw personal calibration photos should not be committed to the public repository.
 
 ---
 
 ## 13. Licensing / redistribution caution
 
-The historical Ractiv code uses the Aladdin Free Public License v9 and the Etron binaries may have separate redistribution constraints.
+Historical Ractiv code uses the Aladdin Free Public License v9 and Etron binaries may have separate redistribution constraints.
 
-Personal revival / experimentation is the current goal. Before publishing a public installer that bundles historical proprietary DLLs, review redistribution rights separately.
+Personal revival / experimentation is the current goal. Before publishing a public installer bundling historical proprietary DLLs, review redistribution rights separately.
 
 ---
 
 ## 14. One-line handoff for a new chat
 
-Use this if the next session needs a concise command:
-
-> `@GitHub Reprends TouchPlus Revival depuis revival/REVIVAL-ROADMAP.md. Vérifie revival/main, puis la PR #4 / branche revival/phase1b2-local-calibration et le dernier artifact GitHub Actions. Ne réutilise pas l'ancien workflow PowerShell one-shot de calibration. La prochaine action canonique est le smoke physique de touchplus_calibration_capture.exe --pairs 3 avec preview LEFT/RIGHT persistante.`
+> `@GitHub Reprends TouchPlus Revival depuis revival/REVIVAL-ROADMAP.md. Phase 1B.2a est mergée. Vérifie la PR #5 / branche revival/phase1b2b-calibration-solver et sa CI. Le dataset physique 20 poses a 20/20 détections; le solveur robuste garde 17 paires, exclut 016/017/018, sort 0.3799 px stereo RMS, baseline 59.953 mm et epipolar p95 0.3096 px. Prochaine boundary: accepter visuellement les rectifications puis faire un diagnostic disparity/depth métrique avant intégration runtime.`
