@@ -1,0 +1,75 @@
+name: Revival Calibration Capture Kit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "revival/phase1b2-local-calibration"
+    paths:
+      - "revival/tools/touchplus-calibration-capture.ps1"
+      - "revival/calibration/**"
+      - "revival/notes/phase1b2-local-calibration.md"
+      - ".github/workflows/revival-calibration-kit.yml"
+      - "revival/src/atomic_probe.cpp"
+      - "revival/CMakeLists.txt"
+  pull_request:
+    paths:
+      - "revival/tools/touchplus-calibration-capture.ps1"
+      - "revival/calibration/**"
+      - "revival/notes/phase1b2-local-calibration.md"
+      - ".github/workflows/revival-calibration-kit.yml"
+      - "revival/src/atomic_probe.cpp"
+      - "revival/CMakeLists.txt"
+
+jobs:
+  calibration-capture-kit:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Win32 Revival
+        run: cmake -S revival -B build/revival-x86 -A Win32
+
+      - name: Build proven atomic capture probe
+        run: cmake --build build/revival-x86 --config Release --target touchplus_atomic_probe
+
+      - name: Prepare calibration capture kit
+        shell: pwsh
+        run: |
+          $kit = "build/touchplus-phase1b2-calibration-capture-kit"
+          New-Item -ItemType Directory -Force -Path $kit | Out-Null
+
+          $exe = Get-ChildItem -Path build/revival-x86 -Recurse -Filter touchplus_atomic_probe.exe | Select-Object -First 1
+          if (-not $exe) { throw "touchplus_atomic_probe.exe was not produced" }
+
+          Copy-Item $exe.FullName "$kit/touchplus_atomic_probe.exe"
+          Copy-Item "build/eSPAEAWBCtrl.dll" "$kit/eSPAEAWBCtrl.dll"
+          Copy-Item "build/eSPDI.dll" "$kit/eSPDI.dll"
+          Copy-Item "build/EtLib.dll" "$kit/EtLib.dll"
+          Copy-Item "revival/tools/touchplus-calibration-capture.ps1" "$kit/touchplus-calibration-capture.ps1"
+          Copy-Item "revival/calibration/calibration-target-9x6-25mm-a4.svg" "$kit/calibration-target-9x6-25mm-a4.svg"
+          Copy-Item "revival/notes/phase1b2-local-calibration.md" "$kit/README-calibration.md"
+
+          $required = @(
+            "touchplus_atomic_probe.exe",
+            "eSPAEAWBCtrl.dll",
+            "eSPDI.dll",
+            "EtLib.dll",
+            "touchplus-calibration-capture.ps1",
+            "calibration-target-9x6-25mm-a4.svg",
+            "README-calibration.md"
+          )
+          foreach ($name in $required) {
+            $path = Join-Path $kit $name
+            if (-not (Test-Path $path)) { throw "Missing calibration kit file: $path" }
+          }
+          Get-ChildItem $kit | Format-Table Name,Length
+
+      - name: Upload calibration capture kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchplus-phase1b2-calibration-capture-kit
+          path: build/touchplus-phase1b2-calibration-capture-kit/*
+          if-no-files-found: error
+          retention-days: 30
