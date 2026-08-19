@@ -38,20 +38,30 @@ jobs:
       - name: Exercise CLI
         run: python revival/tools/touchplus-depth-sanity.py --help
 
-      - name: Validate candidate calibration JSON
+      - name: Validate physically accepted candidate calibration JSON
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
           p = Path('revival/calibration/candidates/0101007379.json')
           data = json.loads(p.read_text())
-          required = ['device_serial','image_size','K1','D1','K2','D2','R1','R2','P1','P2','Q']
+          required = ['device_serial','image_size','K1','D1','K2','D2','R1','R2','P1','P2','Q','physical_validation']
           missing = [k for k in required if k not in data]
           if missing:
               raise SystemExit(f'Missing keys: {missing}')
           if data['device_serial'] != '0101007379':
               raise SystemExit('Unexpected candidate serial')
-          if data.get('promotion_state') != 'candidate_pending_physical_depth_validation':
-              raise SystemExit('Candidate promotion state is not guarded')
-          print('candidate calibration schema sanity: PASS')
+          if data.get('promotion_state') != 'candidate_physical_depth_validated':
+              raise SystemExit('Candidate physical-validation state is not accepted')
+          pv = data['physical_validation']
+          if pv.get('status') != 'PASS':
+              raise SystemExit('Physical depth validation is not PASS')
+          if pv.get('raw_test_images_committed') is not False:
+              raise SystemExit('Raw physical test images must not be committed')
+          test = pv.get('depth_test', {})
+          if test.get('near_far_ordering') != 'PASS' or test.get('dense_disparity_coherence') != 'PASS':
+              raise SystemExit('Physical depth sanity gates are not PASS')
+          if abs(float(test.get('delta_scale_error_percent', 999))) > 5.0:
+              raise SystemExit('Metric delta scale error exceeds Phase 1C smoke gate')
+          print('candidate physical metric-depth sanity: PASS')
           PY
