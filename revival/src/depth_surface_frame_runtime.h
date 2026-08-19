@@ -1,9 +1,9 @@
 #pragma once
 
-// Load the hardened dominant-plane fitter before the live Phase 2A wrapper.
-// surface_frame_robust.h macro-renames the first-generation fitter while
-// preserving the rest of surface_frame_math.h, then exposes the new fit under
-// the canonical fit_surface_robust name consumed by depth_surface_frame.h.
+// Preserve the proven Phase 1C include order first: depth_probe_lock.h brings
+// in depth_point_robust.h, which macro-renames the legacy point_depth before
+// depth_math.h is parsed. Only after that do we replace the surface fitter.
+#include "depth_probe_lock.h"
 #include "surface_frame_robust.h"
 #include "depth_surface_frame.h"
 
