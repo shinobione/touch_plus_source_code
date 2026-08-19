@@ -1,53 +1,70 @@
 # Phase 2B — Hand / Fingertip 3D
 
-## Current slice: Phase 2B.3 — geodesic fingertip identity
+## Current slice: Phase 2B.4 — background-gated distal fingertip
 
 Physical unit: `0101007379`.
 
-Phase 2A proved that the accepted surface frame is physically useful on the real Touch+: the bare work surface measures near `H=0`, while a 53 mm book measured about 54–55 mm. Phase 2B adds the first automatic single-hand / fingertip layer on top of that accepted metric stack.
+Phase 2A already proved a useful working-surface frame on real hardware: bare table near `H=0`, 53 mm book measured about 54–55 mm. Phase 2B is only allowed to sit on top of that accepted metric stack; it does not modify camera calibration or the saved surface transform.
 
-### What the physical smokes established
+## Physical progression
 
-1. **2B.1 activation / wiring:** tracker runtime, `T` toggle, saved `surface/0101007379.json`, and heartbeat reporting all work on the real device.
-2. **2B.1 foreground blocker:** the first hand smoke produced giant ~19k–26k-cell pseudo-hands. This came from trusting the half-resolution dense depth too aggressively and selecting the largest grown component.
-3. **2B.2 hardened segmentation:** finite surface ROI, `H>=18 mm`, tighter dense cost/uniqueness, local H/disparity consistency, no unconditional 3x3 growth, and implausibly giant/wide component rejection removed the 20k-cell failure. Real selected components are now generally hundreds to a few thousand cells.
-4. **2B.2 real XYZ path:** the hardware run intermittently reached full-resolution robust stereo refinement and emitted finite surface-space fingertip XYZ with MEDIUM/HIGH confidence.
-5. **2B.2 fingertip identity blocker:** video review showed those finite candidates repeatedly landing around the wrist / back-of-hand side. Example real telemetry around the extended-index sequence reported `pixel≈(441–447,83–89)` while the visible distal index was substantially lower in the rectified-left image. The radial-from-centroid extremity scorer was choosing the wrong anatomical endpoint.
+1. **2B.1 wiring PASS** — tracker runtime, `T`, surface-model load and heartbeat work.
+2. **2B.1 foreground FAIL** — real scene produced ~19k–26k-cell pseudo-hands.
+3. **2B.2 hardened segmentation PARTIAL PASS** — finite ROI, `H>=18 mm`, stronger dense gates and giant-component rejection removed the 20k-cell continent; real components dropped to hundreds/few-thousands and the real XYZ refinement path could succeed.
+4. **2B.2 fingertip identity FAIL** — finite candidates landed on wrist/back-of-hand rather than distal index.
+5. **2B.3 top-entry geodesic FAIL** — physical video still showed false `hand` components with no hand present (e.g. startup `hand=923 cells | coarse_pixel=211,475`) and coarse candidates jumping across the image / near the lower frame edge. Several finite XYZ outputs were still attached too high on the hand. A top-entry geodesic on an already-wrong foreground mask is not enough.
 
-### Phase 2B.3 correction
+## Phase 2B.4 correction
 
-For the canonical Touch+ desk setup, the forearm enters from the **top of the camera image** and the extended index points into the work area. 2B.3 makes that physical setup explicit instead of pretending orientation independence:
+2B.4 changes the boundary rather than tuning the same scorer again.
 
-- keep the accepted 2B.2 hardened foreground segmentation unchanged;
-- treat the selected component's top entry band as a wrist/forearm anchor;
-- walk through only that already-selected component;
-- choose the distal **geodesic** endpoint opposite the wrist, with low-H and boundary thinness only as tie-breakers;
-- robust full-resolution NCC + LEFT↔RIGHT consistency still gates the final finite XYZ;
-- failed refinement still degrades to `unknown`, never a fabricated point;
-- when refinement is unknown, the coarse candidate pixel is still reported and a white diagnostic cross is drawn on the depth heatmap so fingertip identity can be checked visually.
+### Learned clean background
 
-This is deliberately a controlled **single hand + extended index + top-entry forearm** slice. Orientation-independent pose understanding, multiple fingertips and touch/click semantics are later boundaries.
+Tracking is logically gated until the user clears the work area and presses **`B`**. The runtime then learns 30 clean dense-depth frames plus a grayscale reference.
 
-## CI gate
+A current dense cell may become foreground only when:
 
-The synthetic regression now includes:
+- it is measurably closer than a reliable learned background disparity at that same grid cell; or
+- background disparity was unavailable there, in which case both a stronger `H` and a visible appearance change are required.
 
-- a top-entry wrist/forearm;
-- a broad palm;
-- one long index extending downward toward the plane;
-- two shorter folded-finger branches;
-- the prior giant false component that is larger than the real hand.
+This is intended to remove static table/cables/raised clutter and stable dense-depth tails before connected-component analysis.
 
-Phase 2B.3 must first reject the giant distractor, then select the long distal index endpoint geodesically rather than the wrist side. Both x64 and Win32 must pass, followed by the normal Revival Win32 build plus Phase 2A and Phase 1C regressions before packaging.
+### Explicit desk gesture
 
-## Physical smoke required before merge
+This remains deliberately controlled:
 
-1. Preserve the accepted `surface/0101007379.json` and do not move the Touch+ base/hinge.
-2. Start with several seconds of no hand; no persistent finite fingertip is allowed.
-3. Insert one hand from the top of the image with the index clearly extended into the work area.
-4. Check the diagnostic coarse cross even on `fingertip=unknown`: it should sit near the distal index, not the wrist/knuckles.
-5. Move the index slowly left/right, then down/up relative to the work surface.
-6. Finite `fingertip surface XYZ=(X,Y,H)` outputs should stay anatomically attached to the distal index and move continuously; `H` should fall as the fingertip approaches the plane.
-7. Low texture may produce `unknown`; catastrophic or anatomically wrong finite points are blockers.
+- one hand;
+- forearm/wrist enters from the top of the image;
+- index extends downward into the work area.
 
-**Do not merge PR #9 until fingertip identity passes on the real Touch+.**
+The selected component must contain enough cells in the top-entry band. Inside that cleaned component, the fingertip score combines downward image position with geodesic distance; low `H` and local boundary thinness are tie-breakers. Robust full-resolution NCC + LEFT↔RIGHT consistency still gates finite XYZ, and weak evidence must still return `unknown`.
+
+## Runtime controls
+
+- `B` — learn/relearn 30 clean background depth frames;
+- `T` — enable/disable Phase 2B tracker;
+- existing Phase 1C/2A controls remain unchanged.
+
+Expected console sequence:
+
+```text
+[TRACK] heartbeat | background=NOT_READY | clear work area and press B
+[TRACK] BACKGROUND LEARN STARTED ...
+[TRACK] heartbeat | background=LEARNING n/30 ...
+[TRACK] heartbeat | background=READY | no changed top-entry hand candidate ...
+```
+
+Only after `background=READY` should the hand be inserted.
+
+## Acceptance boundary
+
+Do not merge PR #9 until real hardware shows all of the following:
+
+1. clear scene after background learning produces no persistent hand candidate;
+2. one top-entry hand produces a compact changed component rather than static-scene blobs;
+3. diagnostic coarse candidate stays near the distal index;
+4. finite `(Xsurface,Ysurface,H)` remains attached to that same fingertip and moves continuously;
+5. lowering the index toward the work plane lowers `H`;
+6. low texture degrades to `unknown`, not an anatomically wrong finite point.
+
+Touch/click thresholds remain Phase 2C.
