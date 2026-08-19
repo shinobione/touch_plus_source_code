@@ -5,7 +5,7 @@
 #include "depth_probe_lock.h"
 #include "surface_frame_robust.h"
 #include "depth_surface_frame.h"
-#include "fingertip_tracker_v2.h"
+#include "fingertip_tracker_v3.h"
 
 #ifdef point_depth
 #undef point_depth
@@ -53,7 +53,7 @@ struct RuntimeState {
     bool previous_t_down = false;
     bool announced = false;
     std::uint64_t report_counter = 0;
-    touchplus::tracking::FingertipTrackerV2 tracker;
+    touchplus::tracking::FingertipTrackerV3 tracker;
     touchplus::tracking::TrackingResult result;
 };
 
@@ -68,9 +68,10 @@ inline RuntimeState& state() {
 inline void announce_once(RuntimeState& s) {
     if (s.announced) return;
     s.announced = true;
-    std::cout << "\n[TRACK] PHASE 2B.2 RUNTIME ACTIVE"
-              << " | tracker=V2-HARDENED | T toggles ON/OFF\n";
-    std::cout << "[TRACK] finite surface ROI + dense-depth consistency + giant-component rejection active.\n";
+    std::cout << "\n[TRACK] PHASE 2B.3 RUNTIME ACTIVE"
+              << " | tracker=GEODESIC-TIP | T toggles ON/OFF\n";
+    std::cout << "[TRACK] V2 hardened hand segmentation + top-entry wrist prior + distal geodesic fingertip.\n";
+    std::cout << "[TRACK] coarse candidate is reported even when full-res refinement safely returns unknown.\n";
 }
 
 inline bool toggle_requested(RuntimeState& s) {
@@ -91,6 +92,29 @@ inline void maybe_toggle(RuntimeState& s) {
     std::cout << "[TRACK] Phase 2B geometry tracker "
               << (s.enabled ? "ENABLED" : "DISABLED")
               << " (T toggles).\n";
+}
+
+inline void overlay_coarse_candidate(
+    std::vector<uint8_t>& heatmap_bgra,
+    const touchplus::tracking::TrackingResult& r) {
+
+    if (!r.hand_valid || r.fingertip_valid || r.pixel_x < 0 || r.pixel_y < 0) return;
+    if (heatmap_bgra.size() < static_cast<size_t>(kDepthWidth) * kDepthHeight * 4) return;
+
+    const int gx = r.pixel_x / kDepthScale;
+    const int gy = r.pixel_y / kDepthScale;
+    auto set_white = [&](int x, int y) {
+        if (x < 0 || x >= kDepthWidth || y < 0 || y >= kDepthHeight) return;
+        const size_t i = (static_cast<size_t>(y) * kDepthWidth + x) * 4;
+        heatmap_bgra[i + 0] = 255;
+        heatmap_bgra[i + 1] = 255;
+        heatmap_bgra[i + 2] = 255;
+        heatmap_bgra[i + 3] = 255;
+    };
+    for (int d = -5; d <= 5; ++d) {
+        set_white(gx + d, gy);
+        set_white(gx, gy + d);
+    }
 }
 
 inline void maybe_report(RuntimeState& s) {
@@ -115,7 +139,8 @@ inline void maybe_report(RuntimeState& s) {
     }
     if (!r.fingertip_valid) {
         std::cout << "[TRACK] heartbeat | tracker=ENABLED | hand=" << r.hand_samples
-                  << " cells | fingertip=unknown"
+                  << " cells | coarse_pixel=" << r.pixel_x << "," << r.pixel_y
+                  << " | fingertip=unknown"
                   << " | refinement=" << r.refinement_support
                   << " | confidence=" << r.confidence << "\n";
         return;
@@ -159,6 +184,9 @@ inline void compute_depth_heatmap_fingertip_wrapper(
     touchplus::tracking::overlay_tracking(
         workspace.heatmap_bgra,
         runtime.tracker.selected_mask(),
+        runtime.result);
+    tracking_runtime_detail::overlay_coarse_candidate(
+        workspace.heatmap_bgra,
         runtime.result);
 }
 
