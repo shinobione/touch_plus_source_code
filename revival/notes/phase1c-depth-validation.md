@@ -4,87 +4,115 @@ Physical unit: `0101007379`.
 
 ## Purpose
 
-Phase 1B.2b produced a numerically strong stereo calibration from the physical 20-pose checkerboard dataset. Phase 1C must now prove that the candidate calibration produces coherent **metric depth in millimetres** before it is promoted into the live runtime.
+Phase 1B.2b produced a numerically strong stereo calibration from the physical 20-pose checkerboard dataset. Phase 1C proves that the candidate calibration produces coherent **metric depth in millimetres** before any live runtime integration.
 
 Candidate bundle:
 
 `revival/calibration/candidates/0101007379.json`
 
-Its promotion state is intentionally:
+Current candidate state:
 
-`candidate_pending_physical_depth_validation`
+`candidate_physical_depth_validated`
 
-Do not change that state solely because matrix/RMS metrics look good.
+The candidate is physically accepted for the next live Phase 1C integration slice, but it is not yet loaded by the live runtime.
 
-## Accepted calibration evidence
+## Calibration evidence carried into Phase 1C
 
 Robust 20-pose solve:
 
-- 20/20 stereo pairs detected the complete 9x6 inner-corner grid;
-- 17/20 pairs retained after robust reprojection filtering;
+- 20/20 stereo pairs detected the complete 9x6 grid;
+- 17/20 retained after robust reprojection filtering;
 - excluded gross outliers: 016, 017, 018;
 - mono RMS LEFT: 0.3472 px;
 - mono RMS RIGHT: 0.3912 px;
 - stereo RMS: 0.3799 px;
-- baseline: 59.953 mm;
+- solved baseline: **59.953 mm**;
 - rectified vertical epipolar mean: 0.1195 px;
 - rectified vertical epipolar p95: 0.3096 px.
 
-Rectified checkerboard previews were visually reviewed and matching rows/features align horizontally without eye swap or orientation regression.
+The physical center-to-center lens spacing was independently measured at approximately **60–61 mm**, strongly confirming that calibration target scale and recovered stereo baseline are correct.
 
-## Why the checkerboard is not the final dense-depth target
+## Physical depth smoke — PASS
 
-A checkerboard is excellent for geometric calibration because its corners are known precisely, but its repetitive black/white texture can be ambiguous for dense block matching. At close range, StereoSGBM may lock onto a repeated square offset instead of the true correspondence.
+Date: 2026-08-19.
 
-Therefore the physical metric-depth smoke should use a **textured, non-repeating real scene** such as book covers, product packaging, printed graphics or other surfaces with unique local detail.
+A textured Chocapic box was captured in two synchronized stereo pairs, centered approximately on the stereo axis. Raw personal test images remain outside the public repository.
 
-## Offline validation tool
+User ruler measurements from the Touch+ front/lens reference plane to the box front face:
 
-`revival/tools/touchplus-depth-sanity.py`
+- pair 001: **350 mm ±5 mm**;
+- pair 002: **600 mm ±5 mm**.
 
-It:
+Both manifests identify serial `0101007379`, 640x480 LEFT/RIGHT views and canonical upright orientation.
 
-1. loads the candidate calibration by serial;
-2. rectifies one synchronized LEFT/RIGHT pair;
-3. computes StereoSGBM disparity;
-4. reprojects disparity through `Q` into millimetres;
-5. writes rectified stereo, disparity and depth visualizations;
-6. optionally compares selected image points with user-measured physical distances.
+### Analysis method
 
-This tool is deliberately offline first. The live runtime is not modified until physical depth sanity passes.
+The physical pair was:
 
-## Physical smoke setup
+1. rectified using the accepted candidate matrices;
+2. checked with dense StereoSGBM for coherent near/far disparity;
+3. independently matched with epipolar-constrained SIFT correspondences on the textured planar box face;
+4. fit with a robust disparity plane;
+5. evaluated at the rectified principal point so the comparison is made on the stereo axis rather than from an arbitrary image patch.
 
-Use **two textured objects** whose front faces are visible in both cameras and are at clearly different distances from the Touch+.
+### Results
 
-Suggested starting geometry:
+Camera-coordinate Z estimates:
 
-- near object front face: approximately 300–400 mm from the camera/lens front plane;
-- far object front face: approximately 600–800 mm;
-- keep both objects inside both LEFT and RIGHT views;
-- avoid shiny/specular surfaces and large blank areas;
-- do not use the checkerboard as the main dense-depth subject.
+- pair 001: **380.63 mm**;
+- pair 002: **632.68 mm**.
 
-Measure the distance from approximately the front plane of the two Touch+ lenses to each object's front face. A tape/ruler measurement within roughly 5–10 mm is sufficient for the first smoke.
+Near/far ordering: **PASS**.
 
-Capture with the **persistent** accepted capture executable, never the deprecated one-shot PowerShell loop. To keep depth validation separate from calibration data, use a dedicated raw output directory, for example:
+Dense textured disparity coherence: **PASS**.
 
-```powershell
-.\touchplus_calibration_capture.exe --pairs 1 --output .\depth-validation\raw
-```
+Most important metric-scale check:
 
-Despite its historical name, this executable saves synchronized raw LEFT/RIGHT/full frames and does not require a checkerboard to save a pair.
+- physical distance change: `600 - 350 = 250 mm`;
+- stereo-estimated distance change: `632.68 - 380.63 = 252.05 mm`;
+- delta-scale error: **+0.82%**.
 
-Upload the resulting LEFT/RIGHT pair (or ZIP the `depth-validation` directory) and report the two measured object distances.
+This is a strong metric-scale PASS and rules out gross scale, sign, eye-order or Q failures.
 
-## Acceptance boundary
+### Reference-origin clarification
 
-Phase 1C candidate calibration may advance toward live runtime integration only if:
+`Q` reports Z in the calibrated camera coordinate system. The ruler measurements were taken from the Touch+ front/lens reference plane, not from the mathematical camera optical origin.
 
-- rectified views remain correctly oriented and horizontally aligned;
-- near/far ordering is correct;
-- dense disparity is coherent over useful textured regions;
-- measured depth is in the right metric scale;
-- known-distance errors are reasonable for the first diagnostic and can be explained/tuned rather than showing a gross scale/sign/eye-swap failure.
+The implied additive origin offsets are:
 
-No fixed final accuracy promise is declared yet. First establish physically coherent metric Z, then characterize error over the intended Touch+ working volume.
+- pair 001: +30.63 mm;
+- pair 002: +32.68 mm.
+
+Their mean is approximately **31.66 mm**, with only ~1.03 mm half-spread, well inside the ±5 mm physical measurement uncertainty. The two-distance result is therefore consistent with a fixed front-plane → camera-origin reference offset rather than a calibration scale error.
+
+This inferred offset is documented only. It is **not baked into K/D/R/T/P/Q**. Runtime camera-coordinate Z remains the canonical geometric value; a future UI may optionally expose a device-front reference distance as `Z_front ≈ Z_camera - reference_offset` after that reference is characterized further.
+
+## Acceptance decision
+
+**PHASE 1C PHYSICAL METRIC DEPTH SMOKE: PASS**.
+
+Acceptance gates:
+
+- rectified orientation/alignment: PASS;
+- near Z < far Z: PASS;
+- useful textured dense disparity: PASS;
+- physical stereo baseline vs solved baseline: PASS;
+- metric delta scale: PASS (~0.82% error over a 250 mm separation);
+- no gross sign / eye swap / scale / Q failure: PASS.
+
+No final end-user accuracy claim is made yet. The next slice must characterize live depth error over the intended Touch+ working volume.
+
+## Next canonical work
+
+Proceed to live Phase 1C integration:
+
+- load candidate calibration by serial `0101007379`;
+- keep the accepted Etron unlock + persistent stereo session;
+- rectify live LEFT/RIGHT frames;
+- add disparity visualization;
+- reproject to metric camera-coordinate Z with `Q`;
+- add cursor/point depth readout;
+- characterize depth stability and error at several known distances;
+- only then begin Phase 2 hand/finger/touch-plane tracking.
+
+The deprecated repeated PowerShell one-shot capture workflow remains forbidden.
