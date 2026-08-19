@@ -1,6 +1,6 @@
 # TouchPlus Revival — canonical roadmap / handoff
 
-Last updated: **2026-08-19 20:23 CEST**
+Last updated: **2026-08-19 21:41 CEST**
 
 This file is the canonical resume point for TouchPlus Revival. Read it first in a new ChatGPT/Codex session, then inspect the active branch/PR before changing code.
 
@@ -63,23 +63,24 @@ Canonical base: `revival/main`
   - same fixed planar target, seven independent valid probe locations: fitted 3D plane `R²≈0.9984`, RMS residual `≈0.41 mm`, max residual `≈0.57 mm`;
   - one texture-poor location correctly returned 0 valid samples instead of a false finite Z.
 
-### Active slice
+- **Phase 2A — Working-surface frame calibration** — PR #8 merged at `92a34b13f7ac75c6f2362a800ad06c78cb8876fe`.
+  - immutable camera calibration is preserved; surface pose is a separate per-setup artifact;
+  - deterministic dominant-plane consensus rejects coherent wrong-surface samples and gross stereo outliers;
+  - runtime controls: `C` capture, `F` fit/save, `R` reset pending, `U` undo last pending point, `H` surface-relative height, `P` locked depth probe;
+  - physical fit on unit `0101007379`: `19 / 17` samples/inliers, RMS `0.924 mm`, max residual `2.021 mm`, coverage `403.9 × 356.9 mm`, confidence `HIGH`;
+  - seven bare-surface H checks: `+1.7, -0.4, +1.4, +2.6, -0.9, -0.4, +0.3 mm`;
+  - one texture-poor H location correctly returned invalid instead of a false height;
+  - rigid book measured `53 mm` thick produced top-face H readings `54.1 mm` and `55.3 mm`.
 
-**Phase 2A — working-surface frame calibration**
+### Active / next canonical slice
 
-- branch: `revival/phase2a-surface-frame`
-- PR: **#8** (Draft until physical smoke)
-- notes: `revival/notes/phase2a-surface-frame.md`
-- CI: `.github/workflows/revival-surface-frame.yml`
+**Phase 2B — hand / fingertip 3D tracking**
 
-Goal: learn the table/work-surface pose separately from immutable stereo calibration so the Touch+ mechanical pitch hinge is a supported setup variable rather than a geometry bug.
+No Phase 2B branch/PR should be assumed until it is created from the current `revival/main`.
 
-Runtime surface coordinates:
+Goal: use the physically accepted surface frame to detect a hand above the work plane and emit a stable fingertip position as `(Xsurface, Ysurface, H)`.
 
-- `Xsurface`, `Ysurface`: coordinates inside the fitted work plane;
-- `H`: signed perpendicular distance from that plane;
-- `H = 0`: surface;
-- `H > 0`: point above surface, toward the cameras.
+Start geometry-first and keep the already validated camera/depth/surface layers immutable unless a regression is demonstrated.
 
 ---
 
@@ -115,7 +116,7 @@ Stereo facts:
 
 Do not reopen the 60-fps investigation unless later functionality truly requires it.
 
-The physical camera bar has a mechanical pitch hinge. Moving that hinge does **not** invalidate intrinsic/stereo calibration, but it **does** invalidate the camera-to-working-surface transform. Refit Phase 2A after moving the hinge or Touch+ base.
+The physical camera bar has a mechanical pitch hinge. Moving that hinge does **not** invalidate intrinsic/stereo calibration, but it **does** invalidate the camera-to-working-surface transform. Refit the working-surface frame after moving the hinge or Touch+ base.
 
 ---
 
@@ -152,11 +153,20 @@ Camera-coordinate depth physical validation:
 - physical delta 250 mm vs stereo delta 252.05 mm → **+0.82%** scale error;
 - approximately fixed front-reference to camera-origin offset ~31.7 mm is documented but never baked into `K/D/R/T/P/Q`.
 
+Working-surface physical validation:
+
+- dominant-plane fit: 19 samples / 17 inliers;
+- plane RMS: **0.924 mm**;
+- plane max residual: **2.021 mm**;
+- coverage: **403.9 × 356.9 mm**;
+- bare-surface H measurements remain within **-0.9 to +2.6 mm** on seven valid locations;
+- 53 mm rigid object top face measured **54.1 mm** and **55.3 mm**.
+
 Raw personal calibration/test images are evidence only and must not be committed publicly.
 
 ---
 
-## 4. Phase 2A design — surface frame
+## 4. Accepted Phase 2A surface-frame behavior
 
 The surface frame is a **separate per-setup artifact** saved beside the runtime as:
 
@@ -164,39 +174,25 @@ The surface frame is a **separate per-setup artifact** saved beside the runtime 
 
 It must never mutate the per-serial camera calibration.
 
-Current controls layered into `touchplus_depth_viewer.exe`:
+Controls layered into `touchplus_depth_viewer.exe`:
 
 - `C` — capture one fixed surface point for 45 frames with the hardened matcher;
-- `F` — robust plane fit from pending points; MAD outlier rejection; save MEDIUM/HIGH fits only;
+- `F` — deterministic dominant-plane fit + robust refinement; save MEDIUM/HIGH fits only;
 - `R` — reset pending surface samples only;
+- `U` — undo the latest accepted pending surface point;
 - `H` — print camera XYZ + `Xsurface / Ysurface / H`;
 - `P` — existing Phase 1C locked probe diagnostic;
 - `D` / `S` / `Q` — existing depth / rectified stereo / quit.
 
-Recommended calibration: **8–12 well-spread textured points** over the intended work area, including left/right and near/far image regions.
+Recommended recalibration after moving the device: **8–12 well-spread textured points** over the intended work area, including left/right and near/far image regions. A flat printed checkerboard can be used as temporary table texture.
 
-Surface confidence uses:
-
-- sample/inlier count;
-- plane RMS and max residual;
-- spatial X/Y coverage.
-
-LOW fits are not saved.
-
-### Physical acceptance required before merge PR #8
-
-1. keep Touch+ base + pitch hinge fixed;
-2. capture >=8 broad surface points with `C`;
-3. press `F`; require MEDIUM/HIGH fit;
-4. check `H` on several bare-surface textured positions → close to 0 mm;
-5. put one rigid textured object of known thickness on the surface → top-face `H` positive and plausibly near thickness;
-6. no regression in persistent capture, rectification or Phase 1C camera-Z behavior.
+The dominant-plane fitter uses a physically capped consensus threshold so 50–100 mm wrong-depth samples cannot self-justify as inliers by inflating a global MAD threshold.
 
 ---
 
-## 5. Phase 2B — hand/fingertip tracking (after Phase 2A)
+## 5. Phase 2B — hand/fingertip tracking
 
-Only after the working-surface frame is physically accepted:
+Next canonical work:
 
 1. derive surface-relative foreground from `H` rather than raw camera-Z;
 2. isolate hand region above the plane;
@@ -206,6 +202,8 @@ Only after the working-surface frame is physically accepted:
 6. distinguish hover / touch-down / release from surface-relative height and motion.
 
 Start geometry-first. Do not jump to a giant AI model unless needed.
+
+Important Phase 2B acceptance principle: missing/low-confidence stereo data should be rejected or marked unknown rather than silently turned into a false fingertip or false touch.
 
 ---
 
@@ -239,4 +237,4 @@ Potential outputs:
 
 ## 8. One-line handoff
 
-> `@GitHub Reprends TouchPlus Revival depuis revival/REVIVAL-ROADMAP.md. PR #7 live metric depth is merged at 2c1575e. Active Phase 2A is PR #8 / revival/phase2a-surface-frame: keep immutable camera calibration, fit a separate working-surface frame so Xsurface/Ysurface/H absorb the Touch+ mechanical pitch hinge. Current runtime adds C=capture surface point, F=fit/save, R=reset pending, H=measure surface-relative height. Do not merge #8 until physical surface smoke passes.`
+> `@GitHub Reprends TouchPlus Revival depuis revival/REVIVAL-ROADMAP.md. Phase 2A working-surface frame is physically accepted and merged via PR #8 at 92a34b13. Bare-surface H is near zero and a 53 mm object measures 54.1–55.3 mm. The next canonical slice is Phase 2B: create a fresh branch from current revival/main and implement geometry-first hand/fingertip tracking in Xsurface/Ysurface/H. Keep K/D/R/T/P/Q and the accepted surface-frame layer immutable unless a regression is demonstrated.`
