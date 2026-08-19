@@ -109,6 +109,48 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${ETRON_DIR}/eSPAEAWBCtrl.lib"
     )
 
+    # Phase 1C live integration consumes only a physically validated
+    # per-serial calibration. It rectifies both eyes in-process, computes a
+    # dependency-free diagnostic disparity heatmap and reports full-resolution
+    # subpixel camera-coordinate Z under the mouse cursor through Q.
+    add_executable(touchplus_depth_viewer
+        src/depth_viewer.cpp
+        src/depth_math.h
+        src/depth_point_robust.h
+        src/depth_probe_lock.h
+    )
+    list(APPEND REVIVAL_TARGETS touchplus_depth_viewer)
+    target_compile_features(touchplus_depth_viewer PRIVATE cxx_std_20)
+    target_compile_definitions(touchplus_depth_viewer PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+    )
+    target_include_directories(touchplus_depth_viewer PRIVATE
+        "${ETRON_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    # Keep depth_math.h as the dependency-free reference implementation. The
+    # first forced header replaces the permissive cursor matcher with the
+    # hardened texture/NCC/LR-consistency/local-consensus/temporal matcher. The
+    # second adds a P-key locked diagnostic wrapper reporting valid %, median Z,
+    # MAD and confidence without changing calibration/Q or normal live behavior.
+    if(MSVC)
+        target_compile_options(touchplus_depth_viewer PRIVATE
+            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_point_robust.h"
+            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_probe_lock.h"
+        )
+    endif()
+    target_link_libraries(touchplus_depth_viewer PRIVATE
+        mf
+        mfplat
+        mfreadwrite
+        mfuuid
+        ole32
+        gdi32
+        user32
+        "${ETRON_DIR}/eSPDI.lib"
+        "${ETRON_DIR}/eSPAEAWBCtrl.lib"
+    )
+
     # Raw timing probe: no decode, no color conversion, no GDI. This isolates
     # the actual native MJPEG sample cadence delivered by the Touch+ driver.
     add_executable(touchplus_timing_probe
@@ -183,6 +225,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
             touchplus_atomic_probe
             touchplus_stereo_viewer
             touchplus_calibration_capture
+            touchplus_depth_viewer
             touchplus_timing_probe
             touchplus_directshow_timing_probe
             touchplus_directshow_legacy_timing_probe)
