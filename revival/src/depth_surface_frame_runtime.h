@@ -5,7 +5,7 @@
 #include "depth_probe_lock.h"
 #include "surface_frame_robust.h"
 #include "depth_surface_frame.h"
-#include "fingertip_tracker.h"
+#include "fingertip_tracker_v2.h"
 
 #ifdef point_depth
 #undef point_depth
@@ -53,7 +53,7 @@ struct RuntimeState {
     bool previous_t_down = false;
     bool announced = false;
     std::uint64_t report_counter = 0;
-    touchplus::tracking::FingertipTracker tracker;
+    touchplus::tracking::FingertipTrackerV2 tracker;
     touchplus::tracking::TrackingResult result;
 };
 
@@ -68,9 +68,9 @@ inline RuntimeState& state() {
 inline void announce_once(RuntimeState& s) {
     if (s.announced) return;
     s.announced = true;
-    std::cout << "\n[TRACK] PHASE 2B RUNTIME ACTIVE"
-              << " | tracker=ENABLED | T toggles ON/OFF\n";
-    std::cout << "[TRACK] Heartbeat/reporting is active even with no hand present.\n";
+    std::cout << "\n[TRACK] PHASE 2B.2 RUNTIME ACTIVE"
+              << " | tracker=V2-HARDENED | T toggles ON/OFF\n";
+    std::cout << "[TRACK] finite surface ROI + dense-depth consistency + giant-component rejection active.\n";
 }
 
 inline bool toggle_requested(RuntimeState& s) {
@@ -109,8 +109,8 @@ inline void maybe_report(RuntimeState& s) {
         return;
     }
     if (!r.hand_valid) {
-        std::cout << "[TRACK] heartbeat | tracker=ENABLED | no above-plane hand candidate"
-                  << " | foreground=" << r.foreground_samples << "\n";
+        std::cout << "[TRACK] heartbeat | tracker=ENABLED | no plausible above-plane hand candidate"
+                  << " | filtered_foreground=" << r.foreground_samples << "\n";
         return;
     }
     if (!r.fingertip_valid) {
