@@ -204,8 +204,20 @@ jobs:
           Run: .\touchplus_depth_viewer.exe
 
           Default: RECTIFIED LEFT | DEPTH HEATMAP.
-          Move the mouse over texture to read full-resolution subpixel camera-coordinate Z in mm.
+          Move the mouse over texture to read hardened full-resolution camera-coordinate Z in mm.
           D = depth view, S = rectified stereo, ESC/Q = quit.
+
+          LOCKED PROBE DIAGNOSTIC:
+          1. Put the cursor on a textured detail and keep the target still.
+          2. Press P once to lock that exact image coordinate.
+          3. Watch the console: every 15 samples it reports sample count, valid %, median Z, MAD and confidence.
+          4. Press P again to print the final summary and unlock.
+          5. Prefer a conservative invalid sample over a confident false Z.
+
+          Confidence guide:
+          HIGH   = >=50% valid, >=12 valid samples, MAD <=8 mm
+          MEDIUM = >=25% valid, >=6 valid samples, MAD <=20 mm
+          LOW    = otherwise
 
           The packaged calibration is physically validated for Touch+ serial 0101007379.
           The executable reads the hardware serial from flash and refuses a mismatched calibration.
