@@ -51,14 +51,26 @@ namespace tracking_runtime_detail {
 struct RuntimeState {
     bool enabled = true;
     bool previous_t_down = false;
+    bool announced = false;
     std::uint64_t report_counter = 0;
     touchplus::tracking::FingertipTracker tracker;
     touchplus::tracking::TrackingResult result;
 };
 
 inline RuntimeState& state() {
+    // All tracker work is intentionally owned by the capture/depth thread.
+    // Keeping one thread-local state avoids cross-thread tracker mutation while
+    // GetAsyncKeyState lets the capture thread observe the physical T key.
     static thread_local RuntimeState value;
     return value;
+}
+
+inline void announce_once(RuntimeState& s) {
+    if (s.announced) return;
+    s.announced = true;
+    std::cout << "\n[TRACK] PHASE 2B RUNTIME ACTIVE"
+              << " | tracker=ENABLED | T toggles ON/OFF\n";
+    std::cout << "[TRACK] Heartbeat/reporting is active even with no hand present.\n";
 }
 
 inline bool toggle_requested(RuntimeState& s) {
@@ -69,6 +81,7 @@ inline bool toggle_requested(RuntimeState& s) {
 }
 
 inline void maybe_toggle(RuntimeState& s) {
+    announce_once(s);
     if (!toggle_requested(s)) return;
     s.enabled = !s.enabled;
     if (!s.enabled) {
@@ -81,22 +94,27 @@ inline void maybe_toggle(RuntimeState& s) {
 }
 
 inline void maybe_report(RuntimeState& s) {
-    if (!s.enabled) return;
+    announce_once(s);
     ++s.report_counter;
     if (s.report_counter % 30 != 0) return;
 
+    if (!s.enabled) {
+        std::cout << "[TRACK] heartbeat | tracker=DISABLED | press T to enable\n";
+        return;
+    }
+
     const auto& r = s.result;
     if (!touchplus::surface::live_surface_model().valid) {
-        std::cout << "[TRACK] waiting for valid surface/<serial>.json\n";
+        std::cout << "[TRACK] heartbeat | tracker=ENABLED | waiting for valid surface/<serial>.json\n";
         return;
     }
     if (!r.hand_valid) {
-        std::cout << "[TRACK] no above-plane hand candidate"
+        std::cout << "[TRACK] heartbeat | tracker=ENABLED | no above-plane hand candidate"
                   << " | foreground=" << r.foreground_samples << "\n";
         return;
     }
     if (!r.fingertip_valid) {
-        std::cout << "[TRACK] hand=" << r.hand_samples
+        std::cout << "[TRACK] heartbeat | tracker=ENABLED | hand=" << r.hand_samples
                   << " cells | fingertip=unknown"
                   << " | refinement=" << r.refinement_support
                   << " | confidence=" << r.confidence << "\n";
@@ -104,7 +122,7 @@ inline void maybe_report(RuntimeState& s) {
     }
 
     std::cout << std::fixed << std::setprecision(1)
-              << "[TRACK] hand=" << r.hand_samples
+              << "[TRACK] heartbeat | tracker=ENABLED | hand=" << r.hand_samples
               << " cells | fingertip surface XYZ=("
               << r.smoothed_tip.x_mm << ", "
               << r.smoothed_tip.y_mm << ", H="
@@ -126,7 +144,9 @@ inline void compute_depth_heatmap_fingertip_wrapper(
     touchplus::depth::compute_depth_heatmap(c, left, right, workspace);
 
     auto& runtime = tracking_runtime_detail::state();
-    tracking_runtime_detail::maybe_toggle(runtime);
+    // Toggle polling happens in point_depth_surface_runtime_wrapper, which runs
+    // every frame even when the viewer is in rectified-stereo mode. Do not poll
+    // T here as well or one key press could be consumed twice.
     if (!runtime.enabled) return;
 
     const auto& surface = touchplus::surface::live_surface_model();
@@ -150,9 +170,16 @@ inline PointDepth point_depth_surface_runtime_wrapper(
     int cursor_y) {
 
     surface_runtime_detail::handle_undo();
+
+    // Phase 2B activation is deliberately serviced on the every-frame point
+    // path instead of only on half-rate dense-depth updates. This makes the T
+    // key independent of D/S display mode and gives immediate diagnostics.
+    auto& tracking = tracking_runtime_detail::state();
+    tracking_runtime_detail::maybe_toggle(tracking);
+
     PointDepth result = touchplus::surface::point_depth_surface_wrapper(
         c, left, right, cursor_x, cursor_y);
-    tracking_runtime_detail::maybe_report(tracking_runtime_detail::state());
+    tracking_runtime_detail::maybe_report(tracking);
     return result;
 }
 
