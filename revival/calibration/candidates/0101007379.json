@@ -1,0 +1,78 @@
+{
+  "schema": "touchplus-revival-stereo-calibration-v1",
+  "promotion_state": "candidate_physical_depth_validated",
+  "live_runtime_state": "not_integrated",
+  "device_serial": "0101007379",
+  "image_size": [640, 480],
+  "checkerboard": {
+    "inner_corners": [9, 6],
+    "square_mm": 25.0
+  },
+  "source_pair_numbers": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19, 20],
+  "excluded_pair_numbers": [16, 17, 18],
+  "metrics": {
+    "mono_rms_px": {
+      "left": 0.3472377838726888,
+      "right": 0.3912025810300611
+    },
+    "stereo_rms_px": 0.37988550811688937,
+    "baseline_mm": 59.95277852191397,
+    "rectified_epipolar_vertical_error_px": {
+      "mean": 0.1195464380945775,
+      "p95": 0.309613037109375,
+      "max": 1.27630615234375
+    }
+  },
+  "physical_validation": {
+    "date": "2026-08-19",
+    "status": "PASS",
+    "raw_test_images_committed": false,
+    "physical_baseline_center_to_center_mm": {
+      "min": 60.0,
+      "max": 61.0
+    },
+    "depth_test": {
+      "subject": "centered textured cereal box",
+      "physical_reference": "front plane measured from midpoint/front plane between the two lenses",
+      "measurement_uncertainty_mm": 5.0,
+      "method": "candidate rectification; epipolar-constrained SIFT correspondences; robust disparity-plane fit; evaluate Z at rectified principal point; dense StereoSGBM checked separately for coherent near/far disparity",
+      "pair_001": {
+        "measured_front_plane_mm": 350.0,
+        "estimated_camera_coordinate_z_mm": 380.6293,
+        "implied_reference_origin_offset_mm": 30.6293
+      },
+      "pair_002": {
+        "measured_front_plane_mm": 600.0,
+        "estimated_camera_coordinate_z_mm": 632.6817,
+        "implied_reference_origin_offset_mm": 32.6817
+      },
+      "physical_delta_z_mm": 250.0,
+      "estimated_delta_z_mm": 252.0524,
+      "delta_scale_error_percent": 0.8210,
+      "near_far_ordering": "PASS",
+      "dense_disparity_coherence": "PASS",
+      "inferred_front_plane_to_camera_origin_offset_mm": {
+        "mean": 31.6555,
+        "half_spread": 1.0262,
+        "status": "consistent_with_fixed_reference-origin offset; not baked into calibration matrices"
+      },
+      "interpretation": "Q reports camera-coordinate Z, while ruler measurements were taken from the Touch+ lens/front reference plane. The two-distance test preserves metric delta to about 0.8% and is consistent with a nearly constant ~32 mm origin offset. No scale/sign/eye-order failure is present."
+    }
+  },
+  "K1": [[458.2584056952126, 0.0, 300.2882215449808], [0.0, 457.8850076794306, 251.39944611468502], [0.0, 0.0, 1.0]],
+  "D1": [[-0.4437324169954546, 0.2544917441511052, 0.0006272063273985937, 0.0004630314176728996, -0.0885872649496918]],
+  "K2": [[460.35999218294586, 0.0, 323.7257052765847], [0.0, 460.343080754703, 223.81028798995922], [0.0, 0.0, 1.0]],
+  "D2": [[-0.4336305474463265, 0.23412406252608436, 0.001249656697101819, 0.0016003424500181291, -0.0739090330025456]],
+  "R": [[0.9999970243850709, -0.0008437356632324149, -0.002288958526152723], [0.0008533994665171174, 0.9999907137302744, 0.004224235145799408], [0.0022853731324240663, -0.004226175972087344, 0.9999884581865426]],
+  "T_mm": [-59.94606760506245, -0.33854731156252954, 0.8306725617139549],
+  "E": [[-0.0014826024509165007, -0.8292340873509528, -0.3420523603424563], [0.9676692222513654, -0.2540434985984252, 59.94347434369007], [0.2873883620621357, -59.945796574150144, -0.2540012063850793]],
+  "F": [[-2.01520281576666e-09, -1.1280418442410152e-06, 7.11366127209999e-05], [1.315336675961457e-06, -3.455987021163395e-07, 0.03703087485370479], [-0.00011390406443250686, -0.03709834878015767, 1.0]],
+  "R1": [[0.9998582422010447, 0.004861761343160881, -0.016120135833152374], [-0.004827595065480505, 0.9999860191986386, 0.002157714796669608], [0.016130400755123394, -0.002079587435566254, 0.9998677339966406]],
+  "R2": [[0.999888063288859, 0.0056468994416795084, -0.01385544727356271], [-0.00567624348722927, 0.9999817278863677, -0.0020794598500903172], [0.01384345160458924, 0.0021578739745429596, 0.9999018463967257]],
+  "P1": [[520.3653712540631, 0.0, 338.42422103881836, 0.0], [0.0, 520.3653712540631, 223.82475471496582, 0.0], [0.0, 0.0, 1.0, 0.0]],
+  "P2": [[520.3653712540631, 0.0, 338.42422103881836, -31197.349853268388], [0.0, 520.3653712540631, 223.82475471496582, 0.0], [0.0, 0.0, 1.0, 0.0]],
+  "Q": [[1.0, 0.0, 0.0, -338.42422103881836], [0.0, 1.0, 0.0, -223.82475471496582], [0.0, 0.0, 0.0, 520.3653712540631], [0.0, 0.0, 0.016679794075506932, 0.0]],
+  "valid_roi_left": [0, 0, 640, 479],
+  "valid_roi_right": [0, 0, 640, 480],
+  "numeric_acceptance_pass": true
+}
