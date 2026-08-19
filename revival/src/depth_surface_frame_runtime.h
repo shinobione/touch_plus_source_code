@@ -5,7 +5,7 @@
 #include "depth_probe_lock.h"
 #include "surface_frame_robust.h"
 #include "depth_surface_frame.h"
-#include "fingertip_tracker_v3.h"
+#include "fingertip_tracker_v4.h"
 
 #ifdef point_depth
 #undef point_depth
@@ -51,16 +51,15 @@ namespace tracking_runtime_detail {
 struct RuntimeState {
     bool enabled = true;
     bool previous_t_down = false;
+    bool previous_b_down = false;
     bool announced = false;
     std::uint64_t report_counter = 0;
-    touchplus::tracking::FingertipTrackerV3 tracker;
+    touchplus::tracking::FingertipTrackerV4 tracker;
     touchplus::tracking::TrackingResult result;
 };
 
 inline RuntimeState& state() {
     // All tracker work is intentionally owned by the capture/depth thread.
-    // Keeping one thread-local state avoids cross-thread tracker mutation while
-    // GetAsyncKeyState lets the capture thread observe the physical T key.
     static thread_local RuntimeState value;
     return value;
 }
@@ -68,10 +67,10 @@ inline RuntimeState& state() {
 inline void announce_once(RuntimeState& s) {
     if (s.announced) return;
     s.announced = true;
-    std::cout << "\n[TRACK] PHASE 2B.3 RUNTIME ACTIVE"
-              << " | tracker=GEODESIC-TIP | T toggles ON/OFF\n";
-    std::cout << "[TRACK] V2 hardened hand segmentation + top-entry wrist prior + distal geodesic fingertip.\n";
-    std::cout << "[TRACK] coarse candidate is reported even when full-res refinement safely returns unknown.\n";
+    std::cout << "\n[TRACK] PHASE 2B.4 RUNTIME ACTIVE"
+              << " | tracker=BACKGROUND-DISTAL | T toggles ON/OFF\n";
+    std::cout << "[TRACK] Clear the work area, then press B once to learn 30 clean background depth frames.\n";
+    std::cout << "[TRACK] Tracking stays OFF logically until background=READY; B can relearn after scene changes.\n";
 }
 
 inline bool toggle_requested(RuntimeState& s) {
@@ -81,17 +80,31 @@ inline bool toggle_requested(RuntimeState& s) {
     return rising;
 }
 
+inline bool background_requested(RuntimeState& s) {
+    const bool down = (GetAsyncKeyState('B') & 0x8000) != 0;
+    const bool rising = down && !s.previous_b_down;
+    s.previous_b_down = down;
+    return rising;
+}
+
 inline void maybe_toggle(RuntimeState& s) {
     announce_once(s);
     if (!toggle_requested(s)) return;
     s.enabled = !s.enabled;
     if (!s.enabled) {
-        s.tracker.clear();
         s.result = {};
     }
     std::cout << "[TRACK] Phase 2B geometry tracker "
               << (s.enabled ? "ENABLED" : "DISABLED")
               << " (T toggles).\n";
+}
+
+inline void maybe_background(RuntimeState& s) {
+    announce_once(s);
+    if (!background_requested(s)) return;
+    s.tracker.request_background_capture();
+    s.result = {};
+    std::cout << "[TRACK] BACKGROUND LEARN STARTED | remove hand / raised temporary objects and hold scene still.\n";
 }
 
 inline void overlay_coarse_candidate(
@@ -126,19 +139,30 @@ inline void maybe_report(RuntimeState& s) {
         std::cout << "[TRACK] heartbeat | tracker=DISABLED | press T to enable\n";
         return;
     }
-
-    const auto& r = s.result;
     if (!touchplus::surface::live_surface_model().valid) {
         std::cout << "[TRACK] heartbeat | tracker=ENABLED | waiting for valid surface/<serial>.json\n";
         return;
     }
+    if (s.tracker.background_learning()) {
+        std::cout << "[TRACK] heartbeat | background=LEARNING "
+                  << s.tracker.background_frames() << "/"
+                  << touchplus::tracking::kV4BackgroundFrames
+                  << " | keep work area clear and still\n";
+        return;
+    }
+    if (!s.tracker.background_ready()) {
+        std::cout << "[TRACK] heartbeat | background=NOT_READY | clear work area and press B\n";
+        return;
+    }
+
+    const auto& r = s.result;
     if (!r.hand_valid) {
-        std::cout << "[TRACK] heartbeat | tracker=ENABLED | no plausible above-plane hand candidate"
+        std::cout << "[TRACK] heartbeat | background=READY | no changed top-entry hand candidate"
                   << " | filtered_foreground=" << r.foreground_samples << "\n";
         return;
     }
     if (!r.fingertip_valid) {
-        std::cout << "[TRACK] heartbeat | tracker=ENABLED | hand=" << r.hand_samples
+        std::cout << "[TRACK] heartbeat | background=READY | hand=" << r.hand_samples
                   << " cells | coarse_pixel=" << r.pixel_x << "," << r.pixel_y
                   << " | fingertip=unknown"
                   << " | refinement=" << r.refinement_support
@@ -147,7 +171,7 @@ inline void maybe_report(RuntimeState& s) {
     }
 
     std::cout << std::fixed << std::setprecision(1)
-              << "[TRACK] heartbeat | tracker=ENABLED | hand=" << r.hand_samples
+              << "[TRACK] heartbeat | background=READY | hand=" << r.hand_samples
               << " cells | fingertip surface XYZ=("
               << r.smoothed_tip.x_mm << ", "
               << r.smoothed_tip.y_mm << ", H="
@@ -169,9 +193,6 @@ inline void compute_depth_heatmap_fingertip_wrapper(
     touchplus::depth::compute_depth_heatmap(c, left, right, workspace);
 
     auto& runtime = tracking_runtime_detail::state();
-    // Toggle polling happens in point_depth_surface_runtime_wrapper, which runs
-    // every frame even when the viewer is in rectified-stereo mode. Do not poll
-    // T here as well or one key press could be consumed twice.
     if (!runtime.enabled) return;
 
     const auto& surface = touchplus::surface::live_surface_model();
@@ -199,11 +220,11 @@ inline PointDepth point_depth_surface_runtime_wrapper(
 
     surface_runtime_detail::handle_undo();
 
-    // Phase 2B activation is deliberately serviced on the every-frame point
-    // path instead of only on half-rate dense-depth updates. This makes the T
-    // key independent of D/S display mode and gives immediate diagnostics.
+    // Phase 2B controls are serviced on the every-frame point path so T/B do
+    // not depend on whether the half-rate dense-depth display is currently on.
     auto& tracking = tracking_runtime_detail::state();
     tracking_runtime_detail::maybe_toggle(tracking);
+    tracking_runtime_detail::maybe_background(tracking);
 
     PointDepth result = touchplus::surface::point_depth_surface_wrapper(
         c, left, right, cursor_x, cursor_y);
