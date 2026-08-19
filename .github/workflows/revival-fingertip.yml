@@ -78,7 +78,9 @@ jobs:
           $kit = "build/touchplus-phase2b-fingertip-3d"
           New-Item -ItemType Directory -Force -Path $kit | Out-Null
           New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
-          Copy-Item "$src/touchplus_depth_viewer.exe" "$kit/touchplus_depth_viewer.exe"
+          # Use an explicit Phase 2B filename so physical smoke cannot
+          # accidentally launch a leftover Phase 1C/2A depth viewer binary.
+          Copy-Item "$src/touchplus_depth_viewer.exe" "$kit/touchplus_phase2b_tracker.exe"
           Copy-Item "$src/eSPAEAWBCtrl.dll" "$kit/eSPAEAWBCtrl.dll"
           Copy-Item "$src/eSPDI.dll" "$kit/eSPDI.dll"
           Copy-Item "$src/EtLib.dll" "$kit/EtLib.dll"
