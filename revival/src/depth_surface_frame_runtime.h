@@ -1,12 +1,48 @@
 #pragma once
 
+// Load the hardened dominant-plane fitter before the live Phase 2A wrapper.
+// surface_frame_robust.h macro-renames the first-generation fitter while
+// preserving the rest of surface_frame_math.h, then exposes the new fit under
+// the canonical fit_surface_robust name consumed by depth_surface_frame.h.
+#include "surface_frame_robust.h"
 #include "depth_surface_frame.h"
 
 #ifdef point_depth
 #undef point_depth
 #endif
 
+#include <iostream>
+
 namespace touchplus::depth {
+namespace surface_runtime_detail {
+
+inline bool undo_requested() {
+    static thread_local bool previous_u_down = false;
+    const bool down = (GetAsyncKeyState('U') & 0x8000) != 0;
+    const bool rising = down && !previous_u_down;
+    previous_u_down = down;
+    return rising;
+}
+
+inline void handle_undo() {
+    if (!undo_requested()) {
+        return;
+    }
+    auto& s = touchplus::surface::live_detail::state();
+    if (s.capturing) {
+        std::cout << "[SURFACE] U ignored while a C capture is running.\n";
+        return;
+    }
+    if (s.pending_points.empty()) {
+        std::cout << "[SURFACE] No pending surface point to undo.\n";
+        return;
+    }
+    s.pending_points.pop_back();
+    std::cout << "[SURFACE] UNDID last pending point. Remaining="
+              << s.pending_points.size() << ".\n";
+}
+
+} // namespace surface_runtime_detail
 
 inline PointDepth point_depth_surface_runtime_wrapper(
     const Calibration& c,
@@ -14,6 +50,8 @@ inline PointDepth point_depth_surface_runtime_wrapper(
     const std::vector<uint8_t>& right,
     int cursor_x,
     int cursor_y) {
+
+    surface_runtime_detail::handle_undo();
     return touchplus::surface::point_depth_surface_wrapper(
         c, left, right, cursor_x, cursor_y);
 }
