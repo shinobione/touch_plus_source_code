@@ -5,7 +5,7 @@
 #include "depth_probe_lock.h"
 #include "surface_frame_robust.h"
 #include "depth_surface_frame.h"
-#include "fingertip_tracker_v4.h"
+#include "fingertip_tracker_v5.h"
 
 #ifdef point_depth
 #undef point_depth
@@ -54,7 +54,7 @@ struct RuntimeState {
     bool previous_b_down = false;
     bool announced = false;
     std::uint64_t report_counter = 0;
-    touchplus::tracking::FingertipTrackerV4 tracker;
+    touchplus::tracking::FingertipTrackerV5 tracker;
     touchplus::tracking::TrackingResult result;
 };
 
@@ -67,10 +67,10 @@ inline RuntimeState& state() {
 inline void announce_once(RuntimeState& s) {
     if (s.announced) return;
     s.announced = true;
-    std::cout << "\n[TRACK] PHASE 2B.4 RUNTIME ACTIVE"
-              << " | tracker=BACKGROUND-DISTAL | T toggles ON/OFF\n";
-    std::cout << "[TRACK] Clear the work area, then press B once to learn 30 clean background depth frames.\n";
-    std::cout << "[TRACK] Tracking stays OFF logically until background=READY; B can relearn after scene changes.\n";
+    std::cout << "\n[TRACK] PHASE 2B.5 RUNTIME ACTIVE"
+              << " | tracker=APPEARANCE-SILHOUETTE | T toggles ON/OFF\n";
+    std::cout << "[TRACK] Clear the work area, then press B once to learn 30 clean background frames.\n";
+    std::cout << "[TRACK] 2D background silhouette identifies the fingertip; robust stereo is used only to measure it.\n";
 }
 
 inline bool toggle_requested(RuntimeState& s) {
@@ -146,7 +146,7 @@ inline void maybe_report(RuntimeState& s) {
     if (s.tracker.background_learning()) {
         std::cout << "[TRACK] heartbeat | background=LEARNING "
                   << s.tracker.background_frames() << "/"
-                  << touchplus::tracking::kV4BackgroundFrames
+                  << touchplus::tracking::kV5BackgroundFrames
                   << " | keep work area clear and still\n";
         return;
     }
@@ -157,13 +157,13 @@ inline void maybe_report(RuntimeState& s) {
 
     const auto& r = s.result;
     if (!r.hand_valid) {
-        std::cout << "[TRACK] heartbeat | background=READY | no changed top-entry hand candidate"
-                  << " | filtered_foreground=" << r.foreground_samples << "\n";
+        std::cout << "[TRACK] heartbeat | background=READY | no supported changed hand silhouette"
+                  << " | changed_cells=" << r.foreground_samples << "\n";
         return;
     }
     if (!r.fingertip_valid) {
-        std::cout << "[TRACK] heartbeat | background=READY | hand=" << r.hand_samples
-                  << " cells | coarse_pixel=" << r.pixel_x << "," << r.pixel_y
+        std::cout << "[TRACK] heartbeat | background=READY | silhouette=" << r.hand_samples
+                  << " cells | tip_pixel=" << r.pixel_x << "," << r.pixel_y
                   << " | fingertip=unknown"
                   << " | refinement=" << r.refinement_support
                   << " | confidence=" << r.confidence << "\n";
@@ -171,12 +171,12 @@ inline void maybe_report(RuntimeState& s) {
     }
 
     std::cout << std::fixed << std::setprecision(1)
-              << "[TRACK] heartbeat | background=READY | hand=" << r.hand_samples
+              << "[TRACK] heartbeat | background=READY | silhouette=" << r.hand_samples
               << " cells | fingertip surface XYZ=("
               << r.smoothed_tip.x_mm << ", "
               << r.smoothed_tip.y_mm << ", H="
               << r.smoothed_tip.h_mm << ") mm"
-              << " | pixel=" << r.pixel_x << "," << r.pixel_y
+              << " | tip_pixel=" << r.pixel_x << "," << r.pixel_y
               << " | support=" << r.refinement_support
               << " | confidence=" << r.confidence << "\n";
 }
