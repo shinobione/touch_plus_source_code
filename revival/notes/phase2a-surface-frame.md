@@ -18,20 +18,27 @@ This deliberately keeps camera calibration (`K/D/R/T/P/Q`) immutable. The mechan
 The existing `touchplus_depth_viewer.exe` retains all Phase 1C controls and adds:
 
 - `C` — capture one robust surface point at the current cursor position. The coordinate is held fixed for 45 frames (~1.5 s on the physical ~30 fps Touch+) and only accepted if enough hardened depth samples are valid.
-- `F` — robustly fit a plane from the pending points. Requires at least 6; 8–12 well-spread samples are recommended. A MEDIUM/HIGH fit is saved to `surface/<serial>.json` beside the executable.
-- `R` — clear only the pending calibration points. An already saved surface model is not deleted.
+- `F` — fit the **dominant physical plane** from the pending points. Requires at least 6; 8–12 well-spread samples are recommended. The fitter deterministically enumerates plane seeds, selects the strongest <=6 mm consensus, refines it with a physically capped robust threshold, and saves only MEDIUM/HIGH results to `surface/<serial>.json` beside the executable.
+- `U` — undo only the most recently accepted pending surface point. Useful when a `C` was clearly taken on the wrong object/edge.
+- `R` — clear all pending calibration points. An already saved surface model is not deleted.
 - `H` — print the current camera XYZ and transformed `Xsurface / Ysurface / H` for a textured point.
 - `P` — unchanged locked point-depth diagnostic from Phase 1C.
 - `D` / `S` / `Q` — unchanged depth / rectified stereo / quit controls.
+
+## Why dominant-plane consensus is required
+
+The first Phase 2A physical attempt captured 23 broad-coverage points and produced an obviously invalid `53.2 mm RMS / 101.3 mm max` fit while still calling all `23/23` samples inliers. This exposed a weakness in the original all-points least-squares + MAD rejection: sufficiently contaminated points could inflate the threshold until wrong surfaces justified one another.
+
+The replacement fitter never lets this happen. Candidate planes are scored by actual inlier count and coverage under a fixed millimetric threshold, then refined with a threshold capped at 6 mm. A 50–100 mm bad sample must therefore be rejected rather than redefining the table.
 
 ## Recommended physical calibration
 
 1. Do not move the Touch+ or its pitch hinge during the calibration.
 2. Use the actual intended working surface.
-3. Put the cursor on a textured point on the surface and press `C` once.
+3. Put the cursor on a textured point on that surface and press `C` once.
 4. Wait for `[SURFACE] ADDED point #N` in the console.
-5. Repeat over at least 8 well-spread locations: left/right, near/far, upper/lower image regions.
-6. Avoid sampling the same tiny patch repeatedly; plane confidence includes spatial coverage.
+5. Repeat over **8–12** well-spread locations: left/right, near/far, upper/lower image regions.
+6. Avoid objects sitting above the table, hard depth discontinuities and glossy/repetitive patches. If one accepted point looks obviously wrong, press `U` immediately.
 7. Press `F`.
 
 Expected fit report:
@@ -48,7 +55,7 @@ saved             : ...\surface\0101007379.json
 SURFACE FRAME RESULT: PASS / SAVED
 ```
 
-The robust fit does one MAD-based outlier rejection pass. `LOW` confidence is not saved.
+`LOW` confidence is not saved.
 
 ## Physical smoke after fit
 
@@ -66,7 +73,7 @@ Raw personal imagery is not committed. The saved surface JSON contains geometry 
 
 Phase 2A can merge after:
 
-- Windows/x64 synthetic surface self-test PASS;
+- Windows/x64 synthetic dominant-plane self-test PASS;
 - Win32 viewer build + Phase 1C depth self-test PASS;
 - physical plane fit MEDIUM/HIGH with broad coverage;
 - several bare-surface `H` checks are near zero with no gross outliers;
