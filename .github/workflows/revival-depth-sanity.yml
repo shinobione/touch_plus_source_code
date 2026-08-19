@@ -1,0 +1,57 @@
+name: Revival Metric Depth Sanity
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "revival/phase1c-depth-validation"
+    paths:
+      - "revival/tools/touchplus-depth-sanity.py"
+      - "revival/calibration/candidates/**"
+      - "revival/notes/phase1c-depth-validation.md"
+      - ".github/workflows/revival-depth-sanity.yml"
+  pull_request:
+    paths:
+      - "revival/tools/touchplus-depth-sanity.py"
+      - "revival/calibration/candidates/**"
+      - "revival/notes/phase1c-depth-validation.md"
+      - ".github/workflows/revival-depth-sanity.yml"
+
+jobs:
+  depth-sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip numpy opencv-python-headless
+
+      - name: Compile depth sanity tool
+        run: python -m py_compile revival/tools/touchplus-depth-sanity.py
+
+      - name: Exercise CLI
+        run: python revival/tools/touchplus-depth-sanity.py --help
+
+      - name: Validate candidate calibration JSON
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('revival/calibration/candidates/0101007379.json')
+          data = json.loads(p.read_text())
+          required = ['device_serial','image_size','K1','D1','K2','D2','R1','R2','P1','P2','Q']
+          missing = [k for k in required if k not in data]
+          if missing:
+              raise SystemExit(f'Missing keys: {missing}')
+          if data['device_serial'] != '0101007379':
+              raise SystemExit('Unexpected candidate serial')
+          if data.get('promotion_state') != 'candidate_pending_physical_depth_validation':
+              raise SystemExit('Candidate promotion state is not guarded')
+          print('candidate calibration schema sanity: PASS')
+          PY
