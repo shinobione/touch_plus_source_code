@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="297mm" height="210mm" viewBox="0 0 297 210">
+  <rect x="0" y="0" width="297" height="210" fill="white"/>
+
+  <!--
+    TouchPlus Revival calibration target
+    10 x 7 squares, 25 mm each => 9 x 6 inner corners.
+    Board physical size: 250 x 175 mm.
+    Print A4 landscape at 100% / Actual size. Do NOT Fit to page.
+  -->
+  <g id="checkerboard" transform="translate(23.5 17.5)">
+    <rect x="0" y="0" width="250" height="175" fill="white" stroke="black" stroke-width="0.3"/>
+
+    <!-- row 0 -->
+    <rect x="0" y="0" width="25" height="25" fill="black"/>
+    <rect x="50" y="0" width="25" height="25" fill="black"/>
+    <rect x="100" y="0" width="25" height="25" fill="black"/>
+    <rect x="150" y="0" width="25" height="25" fill="black"/>
+    <rect x="200" y="0" width="25" height="25" fill="black"/>
+    <!-- row 1 -->
+    <rect x="25" y="25" width="25" height="25" fill="black"/>
+    <rect x="75" y="25" width="25" height="25" fill="black"/>
+    <rect x="125" y="25" width="25" height="25" fill="black"/>
+    <rect x="175" y="25" width="25" height="25" fill="black"/>
+    <rect x="225" y="25" width="25" height="25" fill="black"/>
+    <!-- row 2 -->
+    <rect x="0" y="50" width="25" height="25" fill="black"/>
+    <rect x="50" y="50" width="25" height="25" fill="black"/>
+    <rect x="100" y="50" width="25" height="25" fill="black"/>
+    <rect x="150" y="50" width="25" height="25" fill="black"/>
+    <rect x="200" y="50" width="25" height="25" fill="black"/>
+    <!-- row 3 -->
+    <rect x="25" y="75" width="25" height="25" fill="black"/>
+    <rect x="75" y="75" width="25" height="25" fill="black"/>
+    <rect x="125" y="75" width="25" height="25" fill="black"/>
+    <rect x="175" y="75" width="25" height="25" fill="black"/>
+    <rect x="225" y="75" width="25" height="25" fill="black"/>
+    <!-- row 4 -->
+    <rect x="0" y="100" width="25" height="25" fill="black"/>
+    <rect x="50" y="100" width="25" height="25" fill="black"/>
+    <rect x="100" y="100" width="25" height="25" fill="black"/>
+    <rect x="150" y="100" width="25" height="25" fill="black"/>
+    <rect x="200" y="100" width="25" height="25" fill="black"/>
+    <!-- row 5 -->
+    <rect x="25" y="125" width="25" height="25" fill="black"/>
+    <rect x="75" y="125" width="25" height="25" fill="black"/>
+    <rect x="125" y="125" width="25" height="25" fill="black"/>
+    <rect x="175" y="125" width="25" height="25" fill="black"/>
+    <rect x="225" y="125" width="25" height="25" fill="black"/>
+    <!-- row 6 -->
+    <rect x="0" y="150" width="25" height="25" fill="black"/>
+    <rect x="50" y="150" width="25" height="25" fill="black"/>
+    <rect x="100" y="150" width="25" height="25" fill="black"/>
+    <rect x="150" y="150" width="25" height="25" fill="black"/>
+    <rect x="200" y="150" width="25" height="25" fill="black"/>
+  </g>
+
+  <!-- 100 mm print-scale sanity check, outside the checkerboard. -->
+  <g transform="translate(98.5 201)" font-family="Arial, sans-serif" font-size="3.2" fill="black" stroke="black">
+    <line x1="0" y1="0" x2="100" y2="0" stroke-width="0.35"/>
+    <line x1="0" y1="-2" x2="0" y2="2" stroke-width="0.35"/>
+    <line x1="100" y1="-2" x2="100" y2="2" stroke-width="0.35"/>
+    <text x="50" y="5" text-anchor="middle" stroke="none">100 mm check · squares = 25 mm · 9×6 inner corners</text>
+  </g>
+</svg>
