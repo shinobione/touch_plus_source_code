@@ -84,6 +84,31 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${ETRON_DIR}/eSPAEAWBCtrl.lib"
     )
 
+    # Phase 1B.2a keeps the proven live stream open for the entire calibration
+    # session. SPACE captures the next decoded stereo frame into synchronized
+    # full/left/right PNG files without reopening or re-unlocking the device.
+    add_executable(touchplus_calibration_capture
+        src/calibration_capture.cpp
+    )
+    list(APPEND REVIVAL_TARGETS touchplus_calibration_capture)
+    target_compile_features(touchplus_calibration_capture PRIVATE cxx_std_20)
+    target_compile_definitions(touchplus_calibration_capture PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+    )
+    target_include_directories(touchplus_calibration_capture PRIVATE "${ETRON_DIR}")
+    target_link_libraries(touchplus_calibration_capture PRIVATE
+        mf
+        mfplat
+        mfreadwrite
+        mfuuid
+        ole32
+        gdi32
+        user32
+        windowscodecs
+        "${ETRON_DIR}/eSPDI.lib"
+        "${ETRON_DIR}/eSPAEAWBCtrl.lib"
+    )
+
     # Raw timing probe: no decode, no color conversion, no GDI. This isolates
     # the actual native MJPEG sample cadence delivered by the Touch+ driver.
     add_executable(touchplus_timing_probe
@@ -157,6 +182,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     foreach(etron_target
             touchplus_atomic_probe
             touchplus_stereo_viewer
+            touchplus_calibration_capture
             touchplus_timing_probe
             touchplus_directshow_timing_probe
             touchplus_directshow_legacy_timing_probe)
