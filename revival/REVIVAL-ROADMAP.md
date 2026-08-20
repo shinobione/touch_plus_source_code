@@ -80,7 +80,7 @@ Active branch: `revival/phase2b-fingertip-3d`
 
 Active PR: **#9** — Draft / **DO NOT MERGE**.
 
-Latest documented branch head at this handoff: `148caa52ae5585996a475e1e8e7580802dfb9805`. Always re-read PR #9 before relying on that SHA because the branch is actively iterated.
+Latest documented branch head at this handoff: `e3524361975bbbd6299410e2ae6107be842d2aee`. Always re-read PR #9 before relying on that SHA because the branch is actively iterated.
 
 Current experimental revision: **Phase 2B.7 — SCOPA-inspired palm-core finger branch**.
 
