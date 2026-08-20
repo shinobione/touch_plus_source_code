@@ -5,12 +5,13 @@
 #include "depth_probe_lock.h"
 #include "surface_frame_robust.h"
 #include "depth_surface_frame.h"
-#include "fingertip_tracker_v6.h"
+#include "fingertip_tracker_v7.h"
 
 #ifdef point_depth
 #undef point_depth
 #endif
 
+#include <cmath>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
@@ -54,7 +55,7 @@ struct RuntimeState {
     bool previous_b_down = false;
     bool announced = false;
     std::uint64_t report_counter = 0;
-    touchplus::tracking::FingertipTrackerV6 tracker;
+    touchplus::tracking::FingertipTrackerV7 tracker;
     touchplus::tracking::TrackingResult result;
 };
 
@@ -67,11 +68,12 @@ inline RuntimeState& state() {
 inline void announce_once(RuntimeState& s) {
     if (s.announced) return;
     s.announced = true;
-    std::cout << "\n[TRACK] PHASE 2B.6 RUNTIME ACTIVE"
-              << " | tracker=SUPPORT-SKELETON | T toggles ON/OFF\n";
+    std::cout << "\n[TRACK] PHASE 2B.7 RUNTIME ACTIVE"
+              << " | tracker=PALM-CORE-BRANCH | T toggles ON/OFF\n";
     std::cout << "[TRACK] Clear the work area, then press B once to learn 30 clean background frames.\n";
-    std::cout << "[TRACK] V6 trims photometric tails around physical 3D support, then selects skeleton endpoints only.\n";
-    std::cout << "[TRACK] Near-tied distal branches are rejected as ambiguous instead of choosing an arbitrary finger.\n";
+    std::cout << "[TRACK] V7 estimates an anatomical palm core, removes the forearm branch, then selects one dominant finger branch.\n";
+    std::cout << "[TRACK] Cyan circle/plus = estimated palm core; white cross = candidate fingertip.\n";
+    std::cout << "[TRACK] Comparable finger branches degrade to ambiguous/unknown; wrong finite anatomy remains a blocker.\n";
 }
 
 inline bool toggle_requested(RuntimeState& s) {
@@ -131,6 +133,38 @@ inline void overlay_coarse_candidate(
     }
 }
 
+inline void overlay_palm_core(
+    std::vector<uint8_t>& heatmap_bgra,
+    const touchplus::tracking::PalmBranchTipV7& identity) {
+
+    if (identity.palm_gx < 0 || identity.palm_gy < 0 || identity.palm_radius <= 0.0) return;
+    if (heatmap_bgra.size() < static_cast<size_t>(kDepthWidth) * kDepthHeight * 4) return;
+
+    auto set_cyan = [&](int x, int y) {
+        if (x < 0 || x >= kDepthWidth || y < 0 || y >= kDepthHeight) return;
+        const size_t i = (static_cast<size_t>(y) * kDepthWidth + x) * 4;
+        heatmap_bgra[i + 0] = 255;
+        heatmap_bgra[i + 1] = 255;
+        heatmap_bgra[i + 2] = 0;
+        heatmap_bgra[i + 3] = 255;
+    };
+
+    const int cx = identity.palm_gx;
+    const int cy = identity.palm_gy;
+    const double radius = identity.palm_radius;
+    for (int d = -4; d <= 4; ++d) {
+        set_cyan(cx + d, cy);
+        set_cyan(cx, cy + d);
+    }
+    constexpr double pi = 3.14159265358979323846;
+    for (int degrees = 0; degrees < 360; degrees += 3) {
+        const double angle = degrees * pi / 180.0;
+        set_cyan(
+            static_cast<int>(std::lround(cx + std::cos(angle) * radius)),
+            static_cast<int>(std::lround(cy + std::sin(angle) * radius)));
+    }
+}
+
 inline void maybe_report(RuntimeState& s) {
     announce_once(s);
     ++s.report_counter;
@@ -157,16 +191,25 @@ inline void maybe_report(RuntimeState& s) {
     }
 
     const auto& r = s.result;
+    const auto& identity = s.tracker.last_identity();
     if (!r.hand_valid) {
-        std::cout << "[TRACK] heartbeat | background=READY | no support-bounded hand skeleton"
+        std::cout << "[TRACK] heartbeat | background=READY | no palm-supported hand"
                   << " | changed_cells=" << r.foreground_samples << "\n";
         return;
     }
+
+    std::cout << std::fixed << std::setprecision(1)
+              << "[TRACK] heartbeat | background=READY | silhouette=" << r.hand_samples
+              << " cells | palm=" << identity.palm_gx << "," << identity.palm_gy
+              << " r=" << identity.palm_radius
+              << " | branches=" << identity.branch_count;
+
     if (!r.fingertip_valid) {
-        std::cout << "[TRACK] heartbeat | background=READY | silhouette=" << r.hand_samples
-                  << " cells | tip_pixel=" << r.pixel_x << "," << r.pixel_y;
-        if (r.pixel_x < 0 || r.pixel_y < 0) {
-            std::cout << " | fingertip=ambiguous/no-dominant-skeleton-endpoint";
+        std::cout << " | tip_pixel=" << r.pixel_x << "," << r.pixel_y;
+        if (identity.ambiguous) {
+            std::cout << " | fingertip=ambiguous/palm-branches";
+        } else if (!identity.valid) {
+            std::cout << " | fingertip=no-dominant-palm-branch";
         } else {
             std::cout << " | fingertip=unknown";
         }
@@ -175,9 +218,7 @@ inline void maybe_report(RuntimeState& s) {
         return;
     }
 
-    std::cout << std::fixed << std::setprecision(1)
-              << "[TRACK] heartbeat | background=READY | silhouette=" << r.hand_samples
-              << " cells | fingertip surface XYZ=("
+    std::cout << " | fingertip surface XYZ=("
               << r.smoothed_tip.x_mm << ", "
               << r.smoothed_tip.y_mm << ", H="
               << r.smoothed_tip.h_mm << ") mm"
@@ -211,6 +252,9 @@ inline void compute_depth_heatmap_fingertip_wrapper(
         workspace.heatmap_bgra,
         runtime.tracker.selected_mask(),
         runtime.result);
+    tracking_runtime_detail::overlay_palm_core(
+        workspace.heatmap_bgra,
+        runtime.tracker.last_identity());
     tracking_runtime_detail::overlay_coarse_candidate(
         workspace.heatmap_bgra,
         runtime.result);
