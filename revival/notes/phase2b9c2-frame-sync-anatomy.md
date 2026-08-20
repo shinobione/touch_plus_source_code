@@ -5,7 +5,7 @@ Physical unit: `0101007379`
 
 ## Status
 
-**IMPLEMENTED CANDIDATE / SYNTHETIC + CI REQUIRED / PHYSICAL LIVE SMOKE REQUIRED / DO NOT MERGE**
+**IMPLEMENTED / SYNTHETIC + WIN32/x64 CI PASS ON PROVISIONAL SHA / FINAL PACKAGING CI PENDING / PHYSICAL LIVE SMOKE REQUIRED / DO NOT MERGE**
 
 ## Goal
 
@@ -109,7 +109,7 @@ Anatomy-only rescue remains useful (pair-007-style behavior), but becomes strict
 
 ## Synthetic physical regression
 
-The fusion self-test now contains two synchronization boundaries:
+The fusion self-test contains two synchronization boundaries.
 
 ### Stable one-frame translation
 
@@ -134,6 +134,17 @@ old gate: point still near current hand = true
 new sync: SHAPE_CHANGED or TIP_NOT_CURRENT_DISTAL
 fusion: UNKNOWN
 stereo: must never be allowed to legitimize that point
+```
+
+On provisional implementation SHA `8d5848a86d355f01df62db9100f549717068489c`, both x64 and Win32 fusion self-tests passed this exact regression. The x64 log recorded:
+
+```text
+age-1 stable translation sync      : 1 tip=408,216 overlap=1
+fast pose old-tip-inside-hand block: 1 old_gate=1 sync=TIP_NOT_CURRENT_DISTAL overlap=1
+anatomy-only age>1 blocks          : 1
+anatomy-only weak shape blocks     : 1
+HIGH stereo cannot override ID     : 1
+PHASE 2B.9C.2 FRAME-SYNCHRONOUS ANATOMY FUSION SELF-TEST: PASS (SYNTHETIC ONLY)
 ```
 
 The test is synthetic and exists to encode the derived physical failure class. It is not physical acceptance.
