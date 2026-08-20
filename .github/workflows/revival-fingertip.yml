@@ -23,16 +23,22 @@ jobs:
       - name: Configure tracker x64
         run: cmake -S revival/phase2b_test -B build/fingertip-x64 -A x64
 
-      - name: Build tracker self-test x64
+      - name: Build tracker self-tests x64
         run: cmake --build build/fingertip-x64 --config Release
 
-      - name: Run tracker self-test x64
+      - name: Run V8 geometry identity self-test x64
         shell: pwsh
         run: |
           & "build/fingertip-x64/Release/touchplus_fingertip_tracker_selftest.exe"
-          if ($LASTEXITCODE -ne 0) { throw "Phase 2B tracker x64 self-test failed: $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B V8 tracker x64 self-test failed: $LASTEXITCODE" }
 
-  landmark-roi-reacquisition-probe:
+      - name: Run 2B.9C live anatomy fusion self-test x64
+        shell: pwsh
+        run: |
+          & "build/fingertip-x64/Release/touchplus_fingertip_fusion_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9C fusion x64 self-test failed: $LASTEXITCODE" }
+
+  landmark-live-sidecar-probe:
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -51,13 +57,21 @@ jobs:
             -Assets "build/landmark-assets" `
             -Venv "build/landmark-venv"
 
-      - name: Run Phase 2B.9B.1 ROI reacquisition self-test
+      - name: Run Phase 2B.9B.1 ROI regression
         shell: pwsh
         run: |
           & "build/landmark-venv/Scripts/python.exe" `
             revival/tools/touchplus_landmark_probe_b91.py `
             --self-test
-          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9B.1 ROI reacquisition self-test failed: $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9B.1 ROI regression failed: $LASTEXITCODE" }
+
+      - name: Run Phase 2B.9C.1 sidecar protocol/ROI self-test
+        shell: pwsh
+        run: |
+          & "build/landmark-venv/Scripts/python.exe" `
+            revival/tools/touchplus_landmark_sidecar_live.py `
+            --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9C.1 live sidecar self-test failed: $LASTEXITCODE" }
 
       - name: Run OpenCV Zoo model-load smoke
         shell: pwsh
@@ -74,20 +88,12 @@ jobs:
             --input "build/blank-left.pgm" `
             --assets "build/landmark-assets" `
             --output "build/landmark-smoke"
-          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9B.1 OpenCV Zoo model-load smoke failed: $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9C OpenCV Zoo model-load smoke failed: $LASTEXITCODE" }
           $summary = Get-Content "build/landmark-smoke/landmark-guided-reacquisition-summary.json" -Raw | ConvertFrom-Json
-          if ($summary.results[0].guided_status -eq "ERROR") {
-            throw "Landmark model smoke returned ERROR: $($summary.results[0].reason)"
-          }
-          if ($summary.metric_z_source -ne "TOUCHPLUS_STEREO_ONLY") {
-            throw "Metric-depth ownership regressed: $($summary.metric_z_source)"
-          }
-          if ($summary.exact_tip_oracle_policy -ne "DISABLED_AFTER_2B9A_PHYSICAL_FAIL") {
-            throw "2B.9A exact-tip oracle must remain disabled"
-          }
-          if ($summary.reacquisition_policy -ne "FULL_THEN_SILHOUETTE_ROI") {
-            throw "ROI reacquisition policy missing"
-          }
+          if ($summary.results[0].guided_status -eq "ERROR") { throw "Landmark model smoke returned ERROR: $($summary.results[0].reason)" }
+          if ($summary.metric_z_source -ne "TOUCHPLUS_STEREO_ONLY") { throw "Metric-depth ownership regressed: $($summary.metric_z_source)" }
+          if ($summary.exact_tip_oracle_policy -ne "DISABLED_AFTER_2B9A_PHYSICAL_FAIL") { throw "2B.9A exact-tip oracle must remain disabled" }
+          if ($summary.reacquisition_policy -ne "FULL_THEN_SILHOUETTE_ROI") { throw "ROI reacquisition policy missing" }
 
   phase2b-win32:
     runs-on: windows-latest
@@ -98,14 +104,20 @@ jobs:
       - name: Configure tracker Win32
         run: cmake -S revival/phase2b_test -B build/fingertip-x86 -A Win32
 
-      - name: Build tracker self-test Win32
+      - name: Build tracker self-tests Win32
         run: cmake --build build/fingertip-x86 --config Release
 
-      - name: Run tracker self-test Win32
+      - name: Run V8 geometry identity self-test Win32
         shell: pwsh
         run: |
           & "build/fingertip-x86/Release/touchplus_fingertip_tracker_selftest.exe"
-          if ($LASTEXITCODE -ne 0) { throw "Phase 2B tracker Win32 self-test failed: $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B V8 tracker Win32 self-test failed: $LASTEXITCODE" }
+
+      - name: Run 2B.9C live anatomy fusion self-test Win32
+        shell: pwsh
+        run: |
+          & "build/fingertip-x86/Release/touchplus_fingertip_fusion_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9C fusion Win32 self-test failed: $LASTEXITCODE" }
 
       - name: Configure Revival Win32
         run: cmake -S revival -B build/revival-x86 -A Win32
@@ -128,37 +140,36 @@ jobs:
           & $exe --self-test $cal
           if ($LASTEXITCODE -ne 0) { throw "Phase 1C depth self-test regressed: $LASTEXITCODE" }
 
-      - name: Prepare Phase 2B.9B.1 ROI reacquisition kit
+      - name: Prepare Phase 2B.9C.1 live anatomy sidecar kit
         shell: pwsh
         run: |
           $src = "build/revival-x86/Release"
-          $kit = "build/touchplus-phase2b9b1-roi-reacquisition"
+          $kit = "build/touchplus-phase2b9c1-live-anatomy-sidecar"
           New-Item -ItemType Directory -Force -Path $kit | Out-Null
           New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
 
-          # The physical tracker remains V8. 2B.9B.1 is an offline retry of
-          # the same captured LEFT frames; OpenCV/ONNX still does not enter the
-          # Etron Win32 process and never supplies metric Z.
           Copy-Item "$src/touchplus_depth_viewer.exe" "$kit/touchplus_phase2b_tracker.exe"
-          if (Test-Path "$src/touchplus_calibration_capture.exe") {
-            Copy-Item "$src/touchplus_calibration_capture.exe" "$kit/touchplus_landmark_capture.exe"
-          }
           Copy-Item "$src/eSPAEAWBCtrl.dll" "$kit/eSPAEAWBCtrl.dll"
           Copy-Item "$src/eSPDI.dll" "$kit/eSPDI.dll"
           Copy-Item "$src/EtLib.dll" "$kit/EtLib.dll"
           Copy-Item "revival/calibration/candidates/0101007379.json" "$kit/calibration/0101007379.json"
+
           Copy-Item "revival/tools/touchplus_landmark_probe.py" "$kit/touchplus_landmark_probe.py"
           Copy-Item "revival/tools/touchplus_landmark_probe_b91.py" "$kit/touchplus_landmark_probe_b91.py"
+          Copy-Item "revival/tools/touchplus_landmark_sidecar_live.py" "$kit/touchplus_landmark_sidecar_live.py"
           Copy-Item "revival/tools/setup-touchplus-landmark-probe.ps1" "$kit/setup-touchplus-landmark-probe.ps1"
+          Copy-Item "revival/tools/start-touchplus-phase2b9c.ps1" "$kit/start-touchplus-phase2b9c.ps1"
+
           Copy-Item "revival/notes/phase2b9b-physical-smoke-2026-08-20.md" "$kit/README-2B9B-physical-smoke.md"
           Copy-Item "revival/notes/phase2b9b1-roi-reacquisition.md" "$kit/README-2B9B1-roi-reacquisition.md"
-          Copy-Item "revival/notes/phase2b9-landmark-oracle-evaluation.md" "$kit/README-2B9A-physical-result.md"
+          Copy-Item "revival/notes/phase2b9c1-live-anatomy-sidecar.md" "$kit/README-2B9C1-live-sidecar.md"
+
           Get-ChildItem -Recurse $kit | Select-Object FullName,Length | Format-Table -AutoSize
 
-      - name: Upload Phase 2B.9B.1 ROI reacquisition kit
+      - name: Upload Phase 2B.9C.1 live anatomy sidecar kit
         uses: actions/upload-artifact@v4
         with:
-          name: touchplus-phase2b9b1-roi-reacquisition-windows
-          path: build/touchplus-phase2b9b1-roi-reacquisition/**
+          name: touchplus-phase2b9c1-live-anatomy-sidecar-windows
+          path: build/touchplus-phase2b9c1-live-anatomy-sidecar/**
           if-no-files-found: error
           retention-days: 30
