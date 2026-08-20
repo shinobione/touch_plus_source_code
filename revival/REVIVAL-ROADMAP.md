@@ -1,8 +1,8 @@
 # TouchPlus Revival — canonical roadmap / handoff
 
-Last updated: **2026-08-19 21:41 CEST**
+Last updated: **2026-08-20 11:38 CEST**
 
-This file is the canonical resume point for TouchPlus Revival. Read it first in a new ChatGPT/Codex session, then inspect the active branch/PR before changing code.
+This file is the canonical resume point for TouchPlus Revival. Read it first in a new ChatGPT/Codex session, then inspect `revival/main`, the active PR and the latest GitHub Actions runs before changing code.
 
 ## 0. Project intent
 
@@ -10,7 +10,7 @@ Revive the abandoned Ractiv Touch+ as a modern stereo/3D input device without re
 
 Canonical pipeline:
 
-`Etron/USB unlock → persistent stereo capture → local metric calibration → rectification → disparity/depth → working-surface frame → 3D hand/finger tracking → useful runtime outputs`
+`Etron/USB unlock → persistent stereo capture → local metric calibration → rectification → disparity/depth → working-surface frame → 3D hand/finger identity → useful runtime outputs`
 
 Revival code lives under `revival/`; canonical integration branch is `revival/main`.
 
@@ -46,14 +46,14 @@ Canonical base: `revival/main`
   - 20-pose physical calibration dataset captured.
 
 - **Phase 1B.2b — Robust local metric calibration solver** — PR #5 merged at `b04d703499d1af8cea14416c2eec4fb5420868bd`.
-  - reproducible Python solver;
+  - reproducible local solver;
   - robust outlier filtering;
-  - JSON/YAML calibration bundle + rectification diagnostics.
+  - per-device calibration bundle + rectification diagnostics.
 
 - **Phase 1C.1 — Physical metric-depth validation** — PR #6 merged at `ae0efe18dcd0616628b83af432909ee01499d507`.
   - solved baseline `59.953 mm` vs physical lens spacing `60–61 mm`;
   - clean 350/600 mm physical depth test preserves distance delta to `+0.82%`;
-  - calibration state: `candidate_physical_depth_validated`.
+  - calibration state physically validated.
 
 - **Phase 1C.2 — Live rectified metric depth viewer** — PR #7 merged at `2c1575efe8f9fc139a553818cb8282d15450855c`.
   - persistent live rectification + diagnostic heatmap;
@@ -72,15 +72,64 @@ Canonical base: `revival/main`
   - one texture-poor H location correctly returned invalid instead of a false height;
   - rigid book measured `53 mm` thick produced top-face H readings `54.1 mm` and `55.3 mm`.
 
-### Active / next canonical slice
+### Active canonical slice
 
 **Phase 2B — hand / fingertip 3D tracking**
 
-No Phase 2B branch/PR should be assumed until it is created from the current `revival/main`.
+Active branch: `revival/phase2b-fingertip-3d`
 
-Goal: use the physically accepted surface frame to detect a hand above the work plane and emit a stable fingertip position as `(Xsurface, Ysurface, H)`.
+Active PR: **#9** — Draft / **DO NOT MERGE**.
 
-Start geometry-first and keep the already validated camera/depth/surface layers immutable unless a regression is demonstrated.
+Latest documented branch head at this handoff: `148caa52ae5585996a475e1e8e7580802dfb9805`. Always re-read PR #9 before relying on that SHA because the branch is actively iterated.
+
+Current experimental revision: **Phase 2B.7 — SCOPA-inspired palm-core finger branch**.
+
+Physical status after the 2026-08-20 bench: **PARTIAL PASS / FINGERTIP IDENTITY FAIL**.
+
+What is accepted inside Phase 2B so far:
+
+- runtime wiring / `T` toggle / surface artifact load;
+- learned background with `B`;
+- no-hand baseline after learning can remain clean (`changed_cells=0` observed);
+- appearance silhouette preserves low-texture distal skin better than dense-depth-only masks;
+- physical support bounding removes the early giant-component / long-tail failure class;
+- ambiguity handling can reject some multi-branch cases;
+- robust stereo refinement can produce metric XYZ when given a valid pixel.
+
+What is **not** accepted:
+
+- anatomical fingertip identity.
+
+In the latest 2B.7 physical bench, a single clearly extended index still produced materially different `tip_pixel` candidates between adjacent frames while the downstream stereo matcher could report MEDIUM/HIGH confidence. Representative sequences include:
+
+```text
+231,193 -> 257,207 -> 373,245 -> 243,167
+263,173 -> 265,177 -> 189,87
+```
+
+Therefore **metric refinement confidence must not be interpreted as identity confidence**. A wrong branch can still lead to a strong stereo match.
+
+Detailed active notes:
+
+- `revival/notes/phase2b-fingertip-3d.md`
+- `revival/notes/phase2b7-physical-smoke-2026-08-20.md` on the active branch.
+
+### Next canonical action
+
+Do not merge #9 and do not loosen the stereo matcher.
+
+Continue Phase 2B by strengthening only the 2D identity stage while preserving accepted lower layers:
+
+1. validate the palm core before branch scoring;
+2. add short temporal palm persistence;
+3. persist finger-branch identity across adjacent frames instead of re-electing independently;
+4. require finger-like branch width/length geometry leaving the palm boundary;
+5. reject unexplained 2D fingertip jumps;
+6. separate **identity confidence** from **stereo refinement confidence**;
+7. return `unknown` whenever identity is unstable, even with excellent stereo support;
+8. compare the geometry path against a lightweight modern 2D hand-landmark fallback before accumulating more endpoint heuristics.
+
+Do not use temporal smoothing to hide a wrong anatomical choice. Temporal logic starts only after a plausible identity exists.
 
 ---
 
@@ -162,7 +211,7 @@ Working-surface physical validation:
 - bare-surface H measurements remain within **-0.9 to +2.6 mm** on seven valid locations;
 - 53 mm rigid object top face measured **54.1 mm** and **55.3 mm**.
 
-Raw personal calibration/test images are evidence only and must not be committed publicly.
+Raw personal calibration/test images and videos are evidence only and must not be committed publicly.
 
 ---
 
@@ -174,7 +223,7 @@ The surface frame is a **separate per-setup artifact** saved beside the runtime 
 
 It must never mutate the per-serial camera calibration.
 
-Controls layered into `touchplus_depth_viewer.exe`:
+Controls layered into the accepted depth/surface viewer:
 
 - `C` — capture one fixed surface point for 45 frames with the hardened matcher;
 - `F` — deterministic dominant-plane fit + robust refinement; save MEDIUM/HIGH fits only;
@@ -192,18 +241,41 @@ The dominant-plane fitter uses a physically capped consensus threshold so 50–1
 
 ## 5. Phase 2B — hand/fingertip tracking
 
-Next canonical work:
+Current accepted conceptual separation:
 
-1. derive surface-relative foreground from `H` rather than raw camera-Z;
-2. isolate hand region above the plane;
-3. extract index/fingertip candidates;
-4. produce live `(Xsurface, Ysurface, H)` fingertip position;
-5. add temporal smoothing and confidence;
-6. distinguish hover / touch-down / release from surface-relative height and motion.
+```text
+background / appearance silhouette
+            ↓
+physical support bounding
+            ↓
+2D hand / palm / fingertip IDENTITY
+            ↓
+robust stereo refinement
+            ↓
+Xsurface / Ysurface / H
+```
 
-Start geometry-first. Do not jump to a giant AI model unless needed.
+The order matters. A correct stereo match for the wrong pixel is still a wrong fingertip.
 
-Important Phase 2B acceptance principle: missing/low-confidence stereo data should be rejected or marked unknown rather than silently turned into a false fingertip or false touch.
+Phase 2B runtime controls:
+
+- `B` — learn/relearn clean background;
+- `T` — tracker ON/OFF;
+- existing Phase 1C/2A controls remain available.
+
+Phase 2B acceptance principle: missing, ambiguous or anatomically unstable data must be rejected or marked `unknown` rather than silently turned into a finite fingertip or touch.
+
+Current merge gate for PR #9:
+
+- no persistent hand in a clear learned scene;
+- palm diagnostic anatomically plausible;
+- one clearly extended index remains the same distal fingertip through vertical, horizontal and diagonal motion;
+- two comparable fingers may become ambiguous/unknown;
+- finite XYZ stays attached to that same fingertip;
+- lowering the index lowers H;
+- low texture or identity instability becomes unknown, never wrong finite HIGH.
+
+Touch/click semantics remain Phase 2C and must not be implemented before Phase 2B identity is physically trustworthy.
 
 ---
 
@@ -229,12 +301,14 @@ Potential outputs:
 - camera reopen can cause gray state;
 - accepted physical rate baseline is ~30 fps;
 - never reuse the deprecated repeated PowerShell one-shot calibration workflow;
-- raw personal calibration/test photos must not be committed publicly;
+- raw personal calibration/test photos/videos must not be committed publicly;
 - moving the Touch+ base or pitch hinge requires **surface-frame** recalibration, not stereo recalibration;
-- historical Ractiv/Etron redistribution rights must be reviewed before any public bundled installer.
+- historical Ractiv/Etron redistribution rights must be reviewed before any public bundled installer;
+- do not treat green synthetic CI as physical acceptance for tracking identity;
+- do not rely on old `sandbox:/...` artifact links across chat windows; retrieve current artifacts from GitHub Actions.
 
 ---
 
 ## 8. One-line handoff
 
-> `@GitHub Reprends TouchPlus Revival depuis revival/REVIVAL-ROADMAP.md. Phase 2A working-surface frame is physically accepted and merged via PR #8 at 92a34b13. Bare-surface H is near zero and a 53 mm object measures 54.1–55.3 mm. The next canonical slice is Phase 2B: create a fresh branch from current revival/main and implement geometry-first hand/fingertip tracking in Xsurface/Ysurface/H. Keep K/D/R/T/P/Q and the accepted surface-frame layer immutable unless a regression is demonstrated.`
+> `@GitHub Reprends TouchPlus Revival depuis revival/REVIVAL-ROADMAP.md. Vérifie revival/main puis la PR #9 / branche revival/phase2b-fingertip-3d et ses derniers checks avant toute modification. Phases 0→2A sont physiquement acceptées. Phase 2B.7 palm-core est un PARTIAL PASS mais le bench physique du 2026-08-20 échoue encore sur l'identité fingertip: no-hand/background et silhouette sont bons, mais un index unique peut recevoir des tip_pixel différents avec MEDIUM/HIGH stereo confidence. Ne merge pas #9, ne touche pas K/D/R/T/P/Q ni au surface frame validé. Prochaine action: renforcer l'identité 2D (palm validation + temporal palm/branch persistence + finger-like branch geometry + identity confidence séparée du stereo confidence), puis refaire un smoke physique.`
