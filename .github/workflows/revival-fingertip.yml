@@ -32,6 +32,52 @@ jobs:
           & "build/fingertip-x64/Release/touchplus_fingertip_tracker_selftest.exe"
           if ($LASTEXITCODE -ne 0) { throw "Phase 2B tracker x64 self-test failed: $LASTEXITCODE" }
 
+  landmark-oracle-probe:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run landmark arbitration self-test
+        shell: pwsh
+        run: |
+          python revival/tools/touchplus_landmark_probe.py --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9A landmark arbitration self-test failed: $LASTEXITCODE" }
+
+      - name: Bootstrap official OpenCV Zoo landmark assets
+        shell: pwsh
+        run: |
+          & revival/tools/setup-touchplus-landmark-probe.ps1 `
+            -Python (Get-Command python).Source `
+            -Assets "build/landmark-assets" `
+            -Venv "build/landmark-venv"
+
+      - name: Run OpenCV Zoo model-load smoke
+        shell: pwsh
+        run: |
+          $bytes = New-Object byte[] (640 * 480)
+          $header = [System.Text.Encoding]::ASCII.GetBytes("P5`n640 480`n255`n")
+          $stream = [System.IO.File]::Open("build/blank-left.pgm", [System.IO.FileMode]::Create)
+          $stream.Write($header, 0, $header.Length)
+          $stream.Write($bytes, 0, $bytes.Length)
+          $stream.Close()
+
+          & "build/landmark-venv/Scripts/python.exe" `
+            revival/tools/touchplus_landmark_probe.py `
+            --input "build/blank-left.pgm" `
+            --assets "build/landmark-assets" `
+            --output "build/landmark-smoke"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9A OpenCV Zoo model-load smoke failed: $LASTEXITCODE" }
+          $summary = Get-Content "build/landmark-smoke/landmark-summary.json" -Raw | ConvertFrom-Json
+          if ($summary[0].oracle_status -eq "ERROR") {
+            throw "Landmark model smoke returned ERROR: $($summary[0].reason)"
+          }
+
   phase2b-win32:
     runs-on: windows-latest
     steps:
@@ -71,30 +117,36 @@ jobs:
           & $exe --self-test $cal
           if ($LASTEXITCODE -ne 0) { throw "Phase 1C depth self-test regressed: $LASTEXITCODE" }
 
-      - name: Prepare Phase 2B.8 temporal identity kit
+      - name: Prepare Phase 2B.9A landmark evaluation kit
         shell: pwsh
         run: |
           $src = "build/revival-x86/Release"
-          $kit = "build/touchplus-phase2b8-temporal-identity"
+          $kit = "build/touchplus-phase2b9a-landmark-evaluation"
           New-Item -ItemType Directory -Force -Path $kit | Out-Null
           New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
-          # Explicit Phase 2B filename prevents accidentally launching a stale
-          # Phase 1C/2A viewer during physical identity smoke.
+
+          # The physical tracker remains V8 geometry-first. 2B.9A adds an
+          # independent offline landmark probe; no DNN dependency enters the
+          # Etron Win32 process yet.
           Copy-Item "$src/touchplus_depth_viewer.exe" "$kit/touchplus_phase2b_tracker.exe"
+          if (Test-Path "$src/touchplus_calibration_capture.exe") {
+            Copy-Item "$src/touchplus_calibration_capture.exe" "$kit/touchplus_landmark_capture.exe"
+          }
           Copy-Item "$src/eSPAEAWBCtrl.dll" "$kit/eSPAEAWBCtrl.dll"
           Copy-Item "$src/eSPDI.dll" "$kit/eSPDI.dll"
           Copy-Item "$src/EtLib.dll" "$kit/EtLib.dll"
           Copy-Item "revival/calibration/candidates/0101007379.json" "$kit/calibration/0101007379.json"
-          Copy-Item "revival/notes/phase2b-fingertip-3d.md" "$kit/README-fingertip-3d.md"
-          if (Test-Path "revival/notes/phase2b8-landmark-fallback-evaluation.md") {
-            Copy-Item "revival/notes/phase2b8-landmark-fallback-evaluation.md" "$kit/README-landmark-fallback.md"
-          }
+          Copy-Item "revival/tools/touchplus_landmark_probe.py" "$kit/touchplus_landmark_probe.py"
+          Copy-Item "revival/tools/setup-touchplus-landmark-probe.ps1" "$kit/setup-touchplus-landmark-probe.ps1"
+          Copy-Item "revival/notes/phase2b8-physical-smoke-2026-08-20.md" "$kit/README-2B8-physical-smoke.md"
+          Copy-Item "revival/notes/phase2b9-landmark-oracle-evaluation.md" "$kit/README-2B9A-landmark-oracle.md"
+          Copy-Item "revival/notes/phase2b8-landmark-fallback-evaluation.md" "$kit/README-landmark-background.md"
           Get-ChildItem -Recurse $kit | Select-Object FullName,Length | Format-Table -AutoSize
 
-      - name: Upload Phase 2B.8 temporal identity kit
+      - name: Upload Phase 2B.9A landmark evaluation kit
         uses: actions/upload-artifact@v4
         with:
-          name: touchplus-phase2b8-temporal-identity-windows-x86
-          path: build/touchplus-phase2b8-temporal-identity/**
+          name: touchplus-phase2b9a-landmark-evaluation-windows
+          path: build/touchplus-phase2b9a-landmark-evaluation/**
           if-no-files-found: error
           retention-days: 30
