@@ -7,32 +7,10 @@
 
 namespace touchplus::contact {
 
-enum class ContactStateV1 {
-    NoFinger,
-    Hover,
-    Approaching,
-    ContactCandidate,
-    TouchDown,
-    TouchHeld,
-    TouchUp,
-};
-
-enum class ContactEventV1 {
-    None,
-    Down,
-    Held,
-    Up,
-};
-
+enum class ContactStateV1 { NoFinger, Hover, Approaching, ContactCandidate, TouchDown, TouchHeld, TouchUp };
+enum class ContactEventV1 { None, Down, Held, Up };
 enum class ContactInputStatusV1 {
-    Valid,
-    TrackingDisabled,
-    SurfaceInvalid,
-    NoHand,
-    IdentityUnknown,
-    AnatomyRejected,
-    StereoLow,
-    NoFreshMetric,
+    Valid, TrackingDisabled, SurfaceInvalid, NoHand, IdentityUnknown, AnatomyRejected, StereoLow, NoFreshMetric,
 };
 
 inline const char* contact_state_name_v1(ContactStateV1 state) {
@@ -124,13 +102,12 @@ struct ContactResultV1 {
 class TouchContactDetectorV1 {
 public:
     explicit TouchContactDetectorV1(ContactConfigV1 config = {}) : config_(config) {}
-
     void reset() { hard_reset(); }
 
     ContactResultV1 update(const ContactSampleV1& sample) {
-        if (!sample.valid || sample.identity_id == 0 ||
-            !std::isfinite(sample.x_mm) || !std::isfinite(sample.y_mm) || !std::isfinite(sample.h_mm)) {
-            const ContactInputStatusV1 status = sample.input_status == ContactInputStatusV1::Valid
+        if (!sample.valid || sample.identity_id == 0 || !std::isfinite(sample.x_mm) ||
+            !std::isfinite(sample.y_mm) || !std::isfinite(sample.h_mm)) {
+            const auto status = sample.input_status == ContactInputStatusV1::Valid
                 ? ContactInputStatusV1::NoFreshMetric : sample.input_status;
             return handle_invalid(status);
         }
@@ -154,11 +131,10 @@ public:
         }
 
         transient_gap_count_ = 0;
-        if (near_count_ > 0) {
+        if (!is_contact_active() && near_count_ > 0) {
             ++evidence_age_frames_;
             if (evidence_age_frames_ > config_.evidence_window_frames) {
-                near_count_ = 0;
-                evidence_age_frames_ = 0;
+                clear_candidate_evidence();
                 state_ = ContactStateV1::Hover;
             }
         }
@@ -173,8 +149,7 @@ public:
         if (std::abs(dh) > config_.max_h_jump_mm || xy_delta > xy_limit) {
             if (is_contact_active()) {
                 const auto out = make_result(ContactStateV1::TouchUp, ContactEventV1::Up, sample, h_velocity, xy_delta,
-                    std::abs(dh) > config_.max_h_jump_mm ? "held-h-jump" : "held-xy-jump",
-                    ContactInputStatusV1::Valid);
+                    std::abs(dh) > config_.max_h_jump_mm ? "held-h-jump" : "held-xy-jump", ContactInputStatusV1::Valid);
                 hard_reset();
                 return out;
             }
@@ -185,31 +160,24 @@ public:
                 ContactInputStatusV1::Valid);
         }
 
-        if (dh <= -config_.min_approach_step_mm) {
-            approach_memory_ = config_.approach_memory_frames;
-        } else if (approach_memory_ > 0) {
-            --approach_memory_;
-        }
+        if (dh <= -config_.min_approach_step_mm) approach_memory_ = config_.approach_memory_frames;
+        else if (approach_memory_ > 0) --approach_memory_;
 
         ContactResultV1 result;
         switch (state_) {
             case ContactStateV1::NoFinger:
                 state_ = ContactStateV1::Hover;
-                result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta,
-                    "finger-valid", ContactInputStatusV1::Valid);
+                result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta, "finger-valid", ContactInputStatusV1::Valid);
                 break;
 
             case ContactStateV1::Hover:
-                near_count_ = 0;
-                evidence_age_frames_ = 0;
+                clear_candidate_evidence();
                 release_count_ = 0;
                 if (sample.h_mm <= config_.approach_band_mm && approach_memory_ > 0) {
                     state_ = ContactStateV1::Approaching;
-                    result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta,
-                        "approach-evidence", ContactInputStatusV1::Valid);
+                    result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta, "approach-evidence", ContactInputStatusV1::Valid);
                 } else {
-                    result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta,
-                        "hover", ContactInputStatusV1::Valid);
+                    result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta, "hover", ContactInputStatusV1::Valid);
                 }
                 break;
 
@@ -217,32 +185,27 @@ public:
                 if (sample.h_mm > config_.approach_band_mm || approach_memory_ == 0) {
                     clear_candidate_evidence();
                     state_ = ContactStateV1::Hover;
-                    result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta,
-                        "approach-lost", ContactInputStatusV1::Valid);
+                    result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta, "approach-lost", ContactInputStatusV1::Valid);
                     break;
                 }
                 if (sample.h_mm <= config_.down_h_mm) {
                     if (xy_delta > config_.max_candidate_xy_step_mm) {
                         clear_candidate_evidence();
                         state_ = ContactStateV1::Hover;
-                        result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta,
-                            "candidate-xy-reset", ContactInputStatusV1::Valid);
+                        result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta, "candidate-xy-reset", ContactInputStatusV1::Valid);
                         break;
                     }
                     if (near_count_ == 0) evidence_age_frames_ = 1;
                     ++near_count_;
                     if (near_count_ >= std::max(1, config_.near_frames_required - 1)) {
                         state_ = ContactStateV1::ContactCandidate;
-                        result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta,
-                            "near-surface-persistent", ContactInputStatusV1::Valid);
+                        result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta, "near-surface-persistent", ContactInputStatusV1::Valid);
                     } else {
-                        result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta,
-                            "near-surface-counting", ContactInputStatusV1::Valid);
+                        result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta, "near-surface-counting", ContactInputStatusV1::Valid);
                     }
                 } else {
                     clear_candidate_evidence();
-                    result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta,
-                        "approaching", ContactInputStatusV1::Valid);
+                    result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta, "approaching", ContactInputStatusV1::Valid);
                 }
                 break;
 
@@ -250,28 +213,24 @@ public:
                 if (sample.h_mm > config_.down_h_mm + config_.candidate_h_slack_mm || approach_memory_ == 0) {
                     clear_candidate_evidence();
                     state_ = sample.h_mm <= config_.approach_band_mm ? ContactStateV1::Approaching : ContactStateV1::Hover;
-                    result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta,
-                        "candidate-aborted", ContactInputStatusV1::Valid);
+                    result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta, "candidate-aborted", ContactInputStatusV1::Valid);
                     break;
                 }
                 if (xy_delta > config_.max_candidate_xy_step_mm) {
                     clear_candidate_evidence();
                     state_ = ContactStateV1::Hover;
-                    result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta,
-                        "candidate-xy-reset", ContactInputStatusV1::Valid);
+                    result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta, "candidate-xy-reset", ContactInputStatusV1::Valid);
                     break;
                 }
                 ++near_count_;
-                if (near_count_ >= config_.near_frames_required &&
-                    evidence_age_frames_ <= config_.evidence_window_frames) {
+                if (near_count_ >= config_.near_frames_required && evidence_age_frames_ <= config_.evidence_window_frames) {
                     state_ = ContactStateV1::TouchDown;
                     held_ = true;
                     release_count_ = 0;
                     result = make_result(state_, ContactEventV1::Down, sample, h_velocity, xy_delta,
                         "touch-confirmed-sparse-evidence", ContactInputStatusV1::Valid);
                 } else {
-                    result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta,
-                        "contact-confirming", ContactInputStatusV1::Valid);
+                    result = make_result(state_, ContactEventV1::None, sample, h_velocity, xy_delta, "contact-confirming", ContactInputStatusV1::Valid);
                 }
                 break;
 
@@ -311,9 +270,7 @@ public:
     }
 
 private:
-    bool is_contact_active() const {
-        return held_ || state_ == ContactStateV1::TouchDown || state_ == ContactStateV1::TouchHeld;
-    }
+    bool is_contact_active() const { return held_ || state_ == ContactStateV1::TouchDown || state_ == ContactStateV1::TouchHeld; }
 
     void clear_candidate_evidence() {
         near_count_ = 0;
@@ -371,8 +328,7 @@ private:
         ++transient_gap_count_;
         if (approach_memory_ > 0) --approach_memory_;
         if (near_count_ > 0) ++evidence_age_frames_;
-        if (transient_gap_count_ > config_.max_transient_gap_frames ||
-            evidence_age_frames_ > config_.evidence_window_frames || approach_memory_ == 0) {
+        if (transient_gap_count_ > config_.max_transient_gap_frames || evidence_age_frames_ > config_.evidence_window_frames || approach_memory_ == 0) {
             hard_reset();
             ContactResultV1 out;
             out.state = ContactStateV1::NoFinger;
@@ -382,16 +338,14 @@ private:
             return out;
         }
 
-        ContactResultV1 out = make_result(state_, ContactEventV1::None, previous_, 0.0, 0.0,
-            "transient-gap-preserved", status);
+        auto out = make_result(state_, ContactEventV1::None, previous_, 0.0, 0.0, "transient-gap-preserved", status);
         out.transient_gap_count = transient_gap_count_;
         out.evidence_age_frames = evidence_age_frames_;
         return out;
     }
 
     ContactResultV1 make_result(ContactStateV1 state, ContactEventV1 event, const ContactSampleV1& sample,
-                                double h_velocity, double xy_delta, const char* reason,
-                                ContactInputStatusV1 input_status) const {
+                                double h_velocity, double xy_delta, const char* reason, ContactInputStatusV1 input_status) const {
         ContactResultV1 out;
         out.state = state;
         out.event = event;
