@@ -4,7 +4,11 @@
 
 Physical unit: `0101007379`.
 
+Current physical status: **2B.7 PARTIAL PASS / FINGERTIP IDENTITY FAIL / DO NOT MERGE**.
+
 Phase 2A already proved a useful working-surface frame on real hardware: bare table near `H=0`, 53 mm book measured about 54–55 mm. Phase 2B sits on top of that accepted metric stack; it does not modify camera calibration or the saved surface transform.
+
+Detailed latest physical smoke note: `revival/notes/phase2b7-physical-smoke-2026-08-20.md`.
 
 ## Physical progression
 
@@ -15,9 +19,10 @@ Phase 2A already proved a useful working-surface frame on real hardware: bare ta
 5. **2B.3 top-entry geodesic FAIL** — no-hand pseudo-hands and jumping coarse endpoints remained.
 6. **2B.4 learned background PARTIAL PASS** — physical video proved `NOT_READY -> LEARNING -> READY` works and reduced no-hand components to roughly 40–110 cells instead of hundreds/thousands. However the visible distal index was still not the tracked pixel because the hand mask required reliable half-resolution dense disparity all the way to distal skin.
 7. **2B.5 appearance silhouette PARTIAL PASS / fingertip FAIL** — the yellow silhouette can cover the full hand and low-texture distal finger, but `tip_pixel` still jumped inside the palm/proximal finger and toward connected photometric tails.
-8. **2B.6 support-bounded skeleton PARTIAL PASS / fingertip FAIL** — ambiguity handling improved, but the latest physical benchmark still emitted anatomically wrong single-index candidates and could attach HIGH confidence to them. Representative failure: `tip_pixel=389,201 | support=8 | confidence=HIGH` while the visible distal index was substantially lower/left. Horizontal/diagonal poses also produced proximal candidates (`415,283`, `441,244`, etc.). Wrong finite/HIGH identity is a hard blocker.
+8. **2B.6 support-bounded skeleton PARTIAL PASS / fingertip FAIL** — ambiguity handling improved, but the physical benchmark still emitted anatomically wrong single-index candidates and could attach HIGH confidence to them. Representative failure: `tip_pixel=389,201 | support=8 | confidence=HIGH` while the visible distal index was substantially lower/left. Horizontal/diagonal poses also produced proximal candidates (`415,283`, `441,244`, etc.). Wrong finite/HIGH identity is a hard blocker.
+9. **2B.7 palm-core branch PARTIAL PASS / fingertip FAIL** — learned background and no-hand rejection remain good, and the new palm/branch diagnostics are useful, but one clearly extended index still does not retain one stable anatomical identity. In the 2026-08-20 physical bench, adjacent single-index frames can jump among substantially different `tip_pixel` values while still reporting MEDIUM/HIGH stereo confidence. Representative sequences include `231,193 -> 257,207 -> 373,245 -> 243,167` and later `263,173 -> 265,177 -> 189,87`. Multi-branch ambiguity can correctly degrade to unknown, but single-index identity is still not mergeable.
 
-## Why 2B.7 changes the identity model
+## Why 2B.7 changed the identity model
 
 The recovered Ractiv SCOPA implementation did **not** equate the longest wrist-rooted skeleton branch with the index. It estimated `palm_point` / `palm_radius` using an interior distance transform, used that palm geometry to separate arm/palm from distal structure, then continued into contour/pose labeling before producing explicit finger points. The recovered `HandResolver` then refined those coarse labeled points locally against the learned background at higher resolution.
 
@@ -31,7 +36,7 @@ The accepted preprocessing remains unchanged:
 2. V5 appearance change produces a 2D hand silhouette so low-texture distal skin remains visible;
 3. V6 physical support bounding trims long appearance-only tails using current above-plane stereo support.
 
-Identity is then replaced by a palm-centric pipeline:
+Identity then uses a palm-centric pipeline:
 
 1. compute an 8-neighbour chamfer distance-to-boundary map inside the bounded hand silhouette;
 2. estimate the **palm core** as the largest interior region below the top-entry forearm;
@@ -64,16 +69,52 @@ These diagnostics deliberately separate three physical failure classes: wrong pa
 
 ## Synthetic regressions
 
-2B.7 must cover more than the V6 diagonal-only success case:
+2B.7 covers more than the V6 diagonal-only success case:
 
 - diagonal dominant index with distal appearance but missing dense support;
 - long connected appearance-only tail;
-- top-entry forearm must be explicitly excluded;
-- **horizontal dominant index** (direct regression for the latest physical benchmark);
-- two similarly long fingers must become ambiguous;
-- tiny no-hand noise must remain rejected.
+- top-entry forearm explicitly excluded;
+- **horizontal dominant index**;
+- two similarly long fingers become ambiguous;
+- tiny no-hand noise remains rejected.
 
-CI synthetic PASS remains necessary but is explicitly **not sufficient**. Physical fingertip identity is the merge gate.
+The synthetic test passes on x64 and Win32, but is explicitly **synthetic only**. Physical fingertip identity remains the merge gate.
+
+## Latest physical bench — 2026-08-20
+
+What passed:
+
+- `B` background learning works;
+- an empty learned scene can remain `background=READY | no palm-supported hand | changed_cells=0`;
+- the supported appearance silhouette follows the hand much better than early Phase 2B revisions;
+- the new palm/branch telemetry is useful;
+- multi-branch cases can return `ambiguous/palm-branches` or `no-dominant-palm-branch` instead of forcing an answer.
+
+What failed:
+
+- the palm/branch identity stage still re-elects different candidates too aggressively;
+- a stable single-index pose can produce materially different `tip_pixel` locations in adjacent heartbeats;
+- strong stereo support can still produce `confidence=HIGH` for a candidate whose **2D anatomical identity is not trustworthy**;
+- therefore MEDIUM/HIGH currently means only “the stereo matcher likes this selected pixel,” not “this pixel is certainly the distal index.”
+
+This distinction is critical: metric refinement is downstream of identity and cannot repair a wrong 2D branch selection.
+
+## Next design requirement
+
+Do **not** fix 2B.7 by loosening stereo gates or only retuning branch weights.
+
+The next identity iteration should preserve camera calibration, depth, surface frame, learned background, appearance silhouette and physical support bounding, while adding stronger identity constraints:
+
+1. validate the palm core against plausible hand geometry before branch scoring;
+2. keep a short temporal palm track instead of solving palm center independently every frame;
+3. keep persistent branch identity over adjacent frames;
+4. require finger-like branch width/length when leaving the palm boundary;
+5. reject large 2D fingertip jumps unless explained by matching palm/hand motion;
+6. separate **identity confidence** from **stereo refinement confidence**;
+7. return `unknown` whenever identity is unstable, even if stereo support is excellent;
+8. compare this controlled geometry path with a lightweight modern 2D hand-landmark fallback before accumulating more ad-hoc endpoint heuristics.
+
+Temporal smoothing must only stabilize an already plausible anatomical candidate; it must never hide a wrong branch choice.
 
 ## Runtime controls
 
@@ -87,13 +128,11 @@ PR #9 remains **DO NOT MERGE** until real hardware shows all of the following:
 
 1. clear scene after background learning produces no persistent accepted hand;
 2. one top-entry hand produces a compact supported silhouette;
-3. cyan palm core stays inside the actual palm rather than wrist/finger/background;
-4. white `tip_pixel` cross stays on the visible distal index for vertical, horizontal and diagonal poses;
+3. palm core stays inside the actual palm rather than wrist/finger/background;
+4. `tip_pixel` stays on the visible distal index for vertical, horizontal and diagonal poses;
 5. two comparable distal fingers may return `ambiguous/unknown` rather than arbitrary selection;
 6. finite `(Xsurface,Ysurface,H)` remains attached to that same fingertip and moves continuously;
 7. lowering the index toward the work plane lowers `H`;
-8. low texture degrades to `unknown`, never an anatomically wrong finite/HIGH point.
-
-**Physical acceptance sequence for 2B.7:** empty scene → `B` → `background=READY` → single vertical index → horizontal index → diagonal index → brief two-finger ambiguity check. Do not merge from synthetic CI alone.
+8. low texture or unstable identity degrades to `unknown`, never an anatomically wrong finite/HIGH point.
 
 Touch/click thresholds remain Phase 2C.
