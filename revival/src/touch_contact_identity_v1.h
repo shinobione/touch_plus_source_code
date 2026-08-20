@@ -142,7 +142,7 @@ public:
 
         if (xy_delta > config_.max_cross_mode_xy_mm || h_delta > config_.max_cross_mode_h_mm ||
             tip_delta > config_.max_cross_mode_tip_px) {
-            return start_new_epoch(obs, "cross-mode-continuity-reset");
+            return start_new_epoch(obs, "contact-identity-motion-reset");
         }
 
         bind_raw_id(obs.source, obs.raw_identity_id);
