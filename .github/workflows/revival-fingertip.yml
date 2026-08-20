@@ -1,0 +1,184 @@
+name: Revival Fingertip 3D
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "revival/**"
+    paths:
+      - "revival/**"
+      - ".github/workflows/revival-fingertip.yml"
+  pull_request:
+    paths:
+      - "revival/**"
+      - ".github/workflows/revival-fingertip.yml"
+
+jobs:
+  fingertip-math-x64:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure tracker x64
+        run: cmake -S revival/phase2b_test -B build/fingertip-x64 -A x64
+
+      - name: Build tracker self-tests x64
+        run: cmake --build build/fingertip-x64 --config Release
+
+      - name: Run V8 geometry identity self-test x64
+        shell: pwsh
+        run: |
+          & "build/fingertip-x64/Release/touchplus_fingertip_tracker_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B V8 tracker x64 self-test failed: $LASTEXITCODE" }
+
+      - name: Run 2B.9C.2 frame-sync anatomy fusion self-test x64
+        shell: pwsh
+        run: |
+          & "build/fingertip-x64/Release/touchplus_fingertip_fusion_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9C.2 fusion x64 self-test failed: $LASTEXITCODE" }
+
+  landmark-live-sidecar-probe:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify launcher quoting from paths with spaces
+        shell: pwsh
+        run: |
+          & revival/tools/start-touchplus-phase2b9c.ps1 `
+            -SelfTestQuoting `
+            -Python (Get-Command python).Source
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9C launcher path quoting regression failed: $LASTEXITCODE" }
+
+      - name: Bootstrap official OpenCV Zoo landmark assets
+        shell: pwsh
+        run: |
+          & revival/tools/setup-touchplus-landmark-probe.ps1 `
+            -Python (Get-Command python).Source `
+            -Assets "build/landmark-assets" `
+            -Venv "build/landmark-venv"
+
+      - name: Run Phase 2B.9B.1 ROI regression
+        shell: pwsh
+        run: |
+          & "build/landmark-venv/Scripts/python.exe" `
+            revival/tools/touchplus_landmark_probe_b91.py `
+            --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9B.1 ROI regression failed: $LASTEXITCODE" }
+
+      - name: Run Phase 2B.9C live sidecar protocol/ROI self-test
+        shell: pwsh
+        run: |
+          & "build/landmark-venv/Scripts/python.exe" `
+            revival/tools/touchplus_landmark_sidecar_live.py `
+            --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9C live sidecar self-test failed: $LASTEXITCODE" }
+
+      - name: Run OpenCV Zoo model-load smoke
+        shell: pwsh
+        run: |
+          $bytes = New-Object byte[] (640 * 480)
+          $header = [System.Text.Encoding]::ASCII.GetBytes("P5`n640 480`n255`n")
+          $stream = [System.IO.File]::Open("build/blank-left.pgm", [System.IO.FileMode]::Create)
+          $stream.Write($header, 0, $header.Length)
+          $stream.Write($bytes, 0, $bytes.Length)
+          $stream.Close()
+
+          & "build/landmark-venv/Scripts/python.exe" `
+            revival/tools/touchplus_landmark_probe_b91.py `
+            --input "build/blank-left.pgm" `
+            --assets "build/landmark-assets" `
+            --output "build/landmark-smoke"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9C OpenCV Zoo model-load smoke failed: $LASTEXITCODE" }
+          $summary = Get-Content "build/landmark-smoke/landmark-guided-reacquisition-summary.json" -Raw | ConvertFrom-Json
+          if ($summary.results[0].guided_status -eq "ERROR") { throw "Landmark model smoke returned ERROR: $($summary.results[0].reason)" }
+          if ($summary.metric_z_source -ne "TOUCHPLUS_STEREO_ONLY") { throw "Metric-depth ownership regressed: $($summary.metric_z_source)" }
+          if ($summary.exact_tip_oracle_policy -ne "DISABLED_AFTER_2B9A_PHYSICAL_FAIL") { throw "2B.9A exact-tip oracle must remain disabled" }
+          if ($summary.reacquisition_policy -ne "FULL_THEN_SILHOUETTE_ROI") { throw "ROI reacquisition policy missing" }
+
+  phase2b-win32:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure tracker Win32
+        run: cmake -S revival/phase2b_test -B build/fingertip-x86 -A Win32
+
+      - name: Build tracker self-tests Win32
+        run: cmake --build build/fingertip-x86 --config Release
+
+      - name: Run V8 geometry identity self-test Win32
+        shell: pwsh
+        run: |
+          & "build/fingertip-x86/Release/touchplus_fingertip_tracker_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B V8 tracker Win32 self-test failed: $LASTEXITCODE" }
+
+      - name: Run 2B.9C.2 frame-sync anatomy fusion self-test Win32
+        shell: pwsh
+        run: |
+          & "build/fingertip-x86/Release/touchplus_fingertip_fusion_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9C.2 fusion Win32 self-test failed: $LASTEXITCODE" }
+
+      - name: Configure Revival Win32
+        run: cmake -S revival -B build/revival-x86 -A Win32
+
+      - name: Build Revival Win32
+        run: cmake --build build/revival-x86 --config Release
+
+      - name: Run Phase 2A surface regression
+        shell: pwsh
+        run: |
+          & "build/revival-x86/Release/touchplus_surface_frame_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2A surface self-test regressed: $LASTEXITCODE" }
+
+      - name: Run Phase 1C calibration/Q regression
+        shell: pwsh
+        run: |
+          $exe = "build/revival-x86/Release/touchplus_depth_viewer.exe"
+          $cal = "revival/calibration/candidates/0101007379.json"
+          if (-not (Test-Path $exe)) { throw "touchplus_depth_viewer.exe was not produced" }
+          & $exe --self-test $cal
+          if ($LASTEXITCODE -ne 0) { throw "Phase 1C depth self-test regressed: $LASTEXITCODE" }
+
+      - name: Prepare Phase 2B.9C.2 frame-sync anatomy kit
+        shell: pwsh
+        run: |
+          $src = "build/revival-x86/Release"
+          $kit = "build/touchplus-phase2b9c2-frame-sync-anatomy"
+          New-Item -ItemType Directory -Force -Path $kit | Out-Null
+          New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
+
+          Copy-Item "$src/touchplus_depth_viewer.exe" "$kit/touchplus_phase2b_tracker.exe"
+          Copy-Item "$src/eSPAEAWBCtrl.dll" "$kit/eSPAEAWBCtrl.dll"
+          Copy-Item "$src/eSPDI.dll" "$kit/eSPDI.dll"
+          Copy-Item "$src/EtLib.dll" "$kit/EtLib.dll"
+          Copy-Item "revival/calibration/candidates/0101007379.json" "$kit/calibration/0101007379.json"
+
+          Copy-Item "revival/tools/touchplus_landmark_probe.py" "$kit/touchplus_landmark_probe.py"
+          Copy-Item "revival/tools/touchplus_landmark_probe_b91.py" "$kit/touchplus_landmark_probe_b91.py"
+          Copy-Item "revival/tools/touchplus_landmark_sidecar_live.py" "$kit/touchplus_landmark_sidecar_live.py"
+          Copy-Item "revival/tools/setup-touchplus-landmark-probe.ps1" "$kit/setup-touchplus-landmark-probe.ps1"
+          Copy-Item "revival/tools/start-touchplus-phase2b9c.ps1" "$kit/start-touchplus-phase2b9c.ps1"
+
+          Copy-Item "revival/notes/phase2b9b-physical-smoke-2026-08-20.md" "$kit/README-2B9B-physical-smoke.md"
+          Copy-Item "revival/notes/phase2b9b1-roi-reacquisition.md" "$kit/README-2B9B1-roi-reacquisition.md"
+          Copy-Item "revival/notes/phase2b9c1-physical-smoke-2026-08-20.md" "$kit/README-2B9C1-physical-smoke.md"
+          Copy-Item "revival/notes/phase2b9c2-frame-sync-anatomy.md" "$kit/README-2B9C2-frame-sync.md"
+
+          Get-ChildItem -Recurse $kit | Select-Object FullName,Length | Format-Table -AutoSize
+
+      - name: Upload Phase 2B.9C.2 frame-sync anatomy kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchplus-phase2b9c2-frame-sync-anatomy-windows
+          path: build/touchplus-phase2b9c2-frame-sync-anatomy/**
+          if-no-files-found: error
+          retention-days: 30
