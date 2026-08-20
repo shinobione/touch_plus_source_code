@@ -12,7 +12,7 @@
 
 namespace touchplus::tracking {
 
-// Phase 2B.6 physical-smoke correction.
+// Phase 2B.6 physical-smoke correction (SUPERSEDED FOR IDENTITY BY 2B.7).
 //
 // 2B.5 proved that appearance silhouette is the right source for anatomical
 // identity, but the real benchmark exposed two remaining failure modes:
@@ -28,6 +28,11 @@ namespace touchplus::tracking {
 //   - rejects near-tied distal branches as anatomically ambiguous;
 //   - extends the winning skeleton endpoint back to the visible silhouette edge;
 //   - only then runs the proven full-resolution stereo matcher around that tip.
+//
+// Physical smoke later proved the wrist-root endpoint identity itself can still
+// emit anatomically wrong HIGH-confidence fingertip points. 2B.7 therefore keeps
+// V6's support-bounding helpers but replaces the identity stage with a palm-core
+// / external-finger-branch decomposition inspired by recovered Ractiv SCOPA.
 //
 // This remains the controlled Phase 2B desk boundary: one top-entry hand with
 // one clearly dominant extended index. Splayed / multi-finger ambiguity must
@@ -494,8 +499,6 @@ public:
         const std::vector<uint8_t>& right_gray,
         const touchplus::depth::DepthWorkspace& workspace) {
 
-        // V5 owns the accepted learned-background state and produces the initial
-        // supported appearance component. Its endpoint / XYZ result is ignored.
         const TrackingResult base_result =
             base_.update(calibration, surface, left_gray, right_gray, workspace);
 
