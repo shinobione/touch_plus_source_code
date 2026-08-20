@@ -49,6 +49,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Verify launcher quoting from paths with spaces
+        shell: pwsh
+        run: |
+          & revival/tools/start-touchplus-phase2b9c.ps1 `
+            -SelfTestQuoting `
+            -Python (Get-Command python).Source
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9C launcher path quoting regression failed: $LASTEXITCODE" }
+
       - name: Bootstrap official OpenCV Zoo landmark assets
         shell: pwsh
         run: |
