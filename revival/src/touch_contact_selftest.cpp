@@ -8,13 +8,21 @@ using namespace touchplus::contact;
 
 struct Counts { int down = 0; int up = 0; int held = 0; };
 
-static ContactSampleV1 sample(std::uint64_t id, double x, double y, double h, bool valid = true) {
+static ContactSampleV1 sample(std::uint64_t id, double x, double y, double h) {
     ContactSampleV1 out;
-    out.valid = valid;
+    out.valid = true;
+    out.input_status = ContactInputStatusV1::Valid;
     out.identity_id = id;
     out.x_mm = x;
     out.y_mm = y;
     out.h_mm = h;
+    return out;
+}
+
+static ContactSampleV1 gap(ContactInputStatusV1 status) {
+    ContactSampleV1 out;
+    out.valid = false;
+    out.input_status = status;
     return out;
 }
 
@@ -89,15 +97,40 @@ int main() {
     {
         TouchContactDetectorV1 detector; Counts counts;
         for (double h = 45.0; h >= 15.0; h -= 3.0) accumulate(detector.update(sample(1, 0, 0, h)), counts);
-        accumulate(detector.update(sample(0, 0, 0, 0, false)), counts);
+        accumulate(detector.update(gap(ContactInputStatusV1::NoHand)), counts);
         for (int i = 0; i < 5; ++i) accumulate(detector.update(sample(1, 0, 0, 7)), counts);
-        require(counts.down == 0, "identity loss during approach must reset without DOWN");
+        require(counts.down == 0, "NO_HAND during approach must hard-reset without DOWN");
+    }
+    {
+        TouchContactDetectorV1 detector; Counts counts;
+        for (double h = 55.0; h >= 14.0; h -= 3.0) accumulate(detector.update(sample(7, 10, 5, h)), counts);
+        accumulate(detector.update(sample(7, 10, 5, 10.0)), counts);
+        auto g1 = detector.update(gap(ContactInputStatusV1::IdentityUnknown)); accumulate(g1, counts);
+        require(g1.event == ContactEventV1::None && g1.reason == "transient-gap-preserved",
+                "one transient identity gap must preserve evidence but emit no event");
+        accumulate(detector.update(sample(7, 10.5, 5, 9.0)), counts);
+        auto g2 = detector.update(gap(ContactInputStatusV1::StereoLow)); accumulate(g2, counts);
+        require(g2.event == ContactEventV1::None && g2.input_status == ContactInputStatusV1::StereoLow,
+                "stereo gap telemetry must be preserved without inventing contact");
+        accumulate(detector.update(sample(7, 11.0, 5, 8.0)), counts);
+        require(counts.down == 1, "three validated near samples across isolated transient gaps must create one DOWN");
+    }
+    {
+        TouchContactDetectorV1 detector; Counts counts;
+        for (double h = 45.0; h >= 13.0; h -= 4.0) accumulate(detector.update(sample(3, 0, 0, h)), counts);
+        accumulate(detector.update(sample(3, 0, 0, 10)), counts);
+        accumulate(detector.update(gap(ContactInputStatusV1::AnatomyRejected)), counts);
+        auto expired = detector.update(gap(ContactInputStatusV1::NoFreshMetric)); accumulate(expired, counts);
+        require(expired.state == ContactStateV1::NoFinger && counts.down == 0,
+                "two consecutive transient gaps must expire sparse candidate evidence");
+        for (int i = 0; i < 6; ++i) accumulate(detector.update(sample(3, 0, 0, 8)), counts);
+        require(counts.down == 0, "expired evidence must not resurrect DOWN from stationary near samples");
     }
     {
         TouchContactDetectorV1 detector; Counts counts;
         approach_and_down(detector, counts);
-        accumulate(detector.update(sample(0, 0, 0, 0, false)), counts);
-        require(counts.down == 1 && counts.up == 1, "identity/stereo loss while held must fail-safe UP");
+        accumulate(detector.update(gap(ContactInputStatusV1::StereoLow)), counts);
+        require(counts.down == 1 && counts.up == 1, "any upstream invalidity while held must fail-safe UP immediately");
     }
     {
         TouchContactDetectorV1 detector; Counts counts;
@@ -107,8 +140,8 @@ int main() {
     }
     {
         TouchContactDetectorV1 detector; Counts counts;
-        for (int i = 0; i < 30; ++i) accumulate(detector.update(sample(0, 0, 0, 0, false)), counts);
-        require(counts.down == 0 && counts.up == 0, "invalid stereo/no finger must invent no contact");
+        for (int i = 0; i < 30; ++i) accumulate(detector.update(gap(ContactInputStatusV1::NoHand)), counts);
+        require(counts.down == 0 && counts.up == 0, "no-hand input must invent no contact");
     }
     {
         TouchContactDetectorV1 detector; Counts counts;
@@ -123,6 +156,6 @@ int main() {
         require(counts.down == 0, "already-near stationary finger without approach must not create DOWN");
     }
 
-    std::cout << "Phase 2C.1 touch/contact semantics self-test: PASS\n";
+    std::cout << "Phase 2C.1A sparse validated touch/contact semantics self-test: PASS\n";
     return 0;
 }
