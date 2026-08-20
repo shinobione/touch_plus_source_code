@@ -94,4 +94,6 @@ PR #9 remains **DO NOT MERGE** until real hardware shows all of the following:
 7. lowering the index toward the work plane lowers `H`;
 8. low texture degrades to `unknown`, never an anatomically wrong finite/HIGH point.
 
+**Physical acceptance sequence for 2B.7:** empty scene → `B` → `background=READY` → single vertical index → horizontal index → diagonal index → brief two-finger ambiguity check. Do not merge from synthetic CI alone.
+
 Touch/click thresholds remain Phase 2C.
