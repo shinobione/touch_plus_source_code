@@ -71,27 +71,30 @@ jobs:
           & $exe --self-test $cal
           if ($LASTEXITCODE -ne 0) { throw "Phase 1C depth self-test regressed: $LASTEXITCODE" }
 
-      - name: Prepare Phase 2B fingertip kit
+      - name: Prepare Phase 2B.8 temporal identity kit
         shell: pwsh
         run: |
           $src = "build/revival-x86/Release"
-          $kit = "build/touchplus-phase2b-fingertip-3d"
+          $kit = "build/touchplus-phase2b8-temporal-identity"
           New-Item -ItemType Directory -Force -Path $kit | Out-Null
           New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
-          # Use an explicit Phase 2B filename so physical smoke cannot
-          # accidentally launch a leftover Phase 1C/2A depth viewer binary.
+          # Explicit Phase 2B filename prevents accidentally launching a stale
+          # Phase 1C/2A viewer during physical identity smoke.
           Copy-Item "$src/touchplus_depth_viewer.exe" "$kit/touchplus_phase2b_tracker.exe"
           Copy-Item "$src/eSPAEAWBCtrl.dll" "$kit/eSPAEAWBCtrl.dll"
           Copy-Item "$src/eSPDI.dll" "$kit/eSPDI.dll"
           Copy-Item "$src/EtLib.dll" "$kit/EtLib.dll"
           Copy-Item "revival/calibration/candidates/0101007379.json" "$kit/calibration/0101007379.json"
           Copy-Item "revival/notes/phase2b-fingertip-3d.md" "$kit/README-fingertip-3d.md"
+          if (Test-Path "revival/notes/phase2b8-landmark-fallback-evaluation.md") {
+            Copy-Item "revival/notes/phase2b8-landmark-fallback-evaluation.md" "$kit/README-landmark-fallback.md"
+          }
           Get-ChildItem -Recurse $kit | Select-Object FullName,Length | Format-Table -AutoSize
 
-      - name: Upload Phase 2B fingertip kit
+      - name: Upload Phase 2B.8 temporal identity kit
         uses: actions/upload-artifact@v4
         with:
-          name: touchplus-phase2b-fingertip-3d-windows-x86
-          path: build/touchplus-phase2b-fingertip-3d/**
+          name: touchplus-phase2b8-temporal-identity-windows-x86
+          path: build/touchplus-phase2b8-temporal-identity/**
           if-no-files-found: error
           retention-days: 30

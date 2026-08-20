@@ -5,7 +5,7 @@
 #include "depth_probe_lock.h"
 #include "surface_frame_robust.h"
 #include "depth_surface_frame.h"
-#include "fingertip_tracker_v7.h"
+#include "fingertip_tracker_v8.h"
 
 #ifdef point_depth
 #undef point_depth
@@ -55,7 +55,7 @@ struct RuntimeState {
     bool previous_b_down = false;
     bool announced = false;
     std::uint64_t report_counter = 0;
-    touchplus::tracking::FingertipTrackerV7 tracker;
+    touchplus::tracking::FingertipTrackerV8 tracker;
     touchplus::tracking::TrackingResult result;
 };
 
@@ -68,12 +68,13 @@ inline RuntimeState& state() {
 inline void announce_once(RuntimeState& s) {
     if (s.announced) return;
     s.announced = true;
-    std::cout << "\n[TRACK] PHASE 2B.7 RUNTIME ACTIVE"
-              << " | tracker=PALM-CORE-BRANCH | T toggles ON/OFF\n";
+    std::cout << "\n[TRACK] PHASE 2B.8 RUNTIME ACTIVE"
+              << " | tracker=TEMPORAL-PALM-BRANCH-ID | T toggles ON/OFF\n";
     std::cout << "[TRACK] Clear the work area, then press B once to learn 30 clean background frames.\n";
-    std::cout << "[TRACK] V7 estimates an anatomical palm core, removes the forearm branch, then selects one dominant finger branch.\n";
-    std::cout << "[TRACK] Cyan circle/plus = estimated palm core; white cross = candidate fingertip.\n";
-    std::cout << "[TRACK] Comparable finger branches degrade to ambiguous/unknown; wrong finite anatomy remains a blocker.\n";
+    std::cout << "[TRACK] V8 validates the palm, describes finger-like branches, then persists branch identity across frames.\n";
+    std::cout << "[TRACK] Cyan circle/plus = palm observation; white cross = current 2D candidate (may still be UNKNOWN).\n";
+    std::cout << "[TRACK] identity_confidence and stereo_confidence are independent; only LOCKED identity reaches stereo.\n";
+    std::cout << "[TRACK] Wrong finite/HIGH anatomy remains a hard blocker; unstable identity must become UNKNOWN.\n";
 }
 
 inline bool toggle_requested(RuntimeState& s) {
@@ -135,9 +136,14 @@ inline void overlay_coarse_candidate(
 
 inline void overlay_palm_core(
     std::vector<uint8_t>& heatmap_bgra,
-    const touchplus::tracking::PalmBranchTipV7& identity) {
+    const touchplus::tracking::IdentityObservationV8& identity) {
 
-    if (identity.palm_gx < 0 || identity.palm_gy < 0 || identity.palm_radius <= 0.0) return;
+    if (!identity.palm_valid ||
+        identity.palm_gx < 0 ||
+        identity.palm_gy < 0 ||
+        identity.palm_radius <= 0.0) {
+        return;
+    }
     if (heatmap_bgra.size() < static_cast<size_t>(kDepthWidth) * kDepthHeight * 4) return;
 
     auto set_cyan = [&](int x, int y) {
@@ -163,6 +169,20 @@ inline void overlay_palm_core(
             static_cast<int>(std::lround(cx + std::cos(angle) * radius)),
             static_cast<int>(std::lround(cy + std::sin(angle) * radius)));
     }
+}
+
+inline const char* rejection_reason(
+    const touchplus::tracking::IdentityObservationV8& identity,
+    const touchplus::tracking::IdentityDecisionV8& decision) {
+
+    if (!identity.palm_valid) return "palm-invalid";
+    if (decision.palm_rejected) return "palm-temporal-reject";
+    if (decision.jump_rejected) return "tip-jump-reject";
+    if (decision.ambiguous || identity.static_ambiguous) return "ambiguous-branch";
+    if (decision.association_rejected) return "branch-association-reject";
+    if (decision.state == touchplus::tracking::IdentityStateV8::Acquiring) return "identity-acquiring";
+    if (!decision.has_candidate) return "no-finger-like-branch";
+    return "identity-unknown";
 }
 
 inline void maybe_report(RuntimeState& s) {
@@ -192,9 +212,12 @@ inline void maybe_report(RuntimeState& s) {
 
     const auto& r = s.result;
     const auto& identity = s.tracker.last_identity();
+    const auto& decision = s.tracker.last_decision();
+
     if (!r.hand_valid) {
         std::cout << "[TRACK] heartbeat | background=READY | no palm-supported hand"
-                  << " | changed_cells=" << r.foreground_samples << "\n";
+                  << " | changed_cells=" << r.foreground_samples
+                  << " | identity=UNKNOWN/LOW | stereo=NOT_RUN\n";
         return;
     }
 
@@ -202,19 +225,23 @@ inline void maybe_report(RuntimeState& s) {
               << "[TRACK] heartbeat | background=READY | silhouette=" << r.hand_samples
               << " cells | palm=" << identity.palm_gx << "," << identity.palm_gy
               << " r=" << identity.palm_radius
-              << " | branches=" << identity.branch_count;
+              << " fill=" << identity.palm_core_fill
+              << " | branches=" << identity.candidates.size()
+              << " | identity_state="
+              << touchplus::tracking::identity_state_name_v8(decision.state)
+              << " | identity_confidence=" << s.tracker.identity_confidence()
+              << " | stereo_confidence=" << s.tracker.stereo_confidence();
 
     if (!r.fingertip_valid) {
-        std::cout << " | tip_pixel=" << r.pixel_x << "," << r.pixel_y;
-        if (identity.ambiguous) {
-            std::cout << " | fingertip=ambiguous/palm-branches";
-        } else if (!identity.valid) {
-            std::cout << " | fingertip=no-dominant-palm-branch";
-        } else {
-            std::cout << " | fingertip=unknown";
+        if (r.pixel_x >= 0 && r.pixel_y >= 0) {
+            std::cout << " | tip_pixel=" << r.pixel_x << "," << r.pixel_y;
         }
-        std::cout << " | refinement=" << r.refinement_support
-                  << " | confidence=" << r.confidence << "\n";
+        std::cout << " | fingertip=UNKNOWN"
+                  << " | reason=" << rejection_reason(identity, decision)
+                  << " | association=" << decision.association_score
+                  << " | tip_residual=" << decision.tip_residual
+                  << " | refinement=" << r.refinement_support
+                  << "\n";
         return;
     }
 
@@ -223,8 +250,9 @@ inline void maybe_report(RuntimeState& s) {
               << r.smoothed_tip.y_mm << ", H="
               << r.smoothed_tip.h_mm << ") mm"
               << " | tip_pixel=" << r.pixel_x << "," << r.pixel_y
+              << " | branch_id=" << decision.branch_id
               << " | support=" << r.refinement_support
-              << " | confidence=" << r.confidence << "\n";
+              << " | final_confidence=" << r.confidence << "\n";
 }
 
 } // namespace tracking_runtime_detail
