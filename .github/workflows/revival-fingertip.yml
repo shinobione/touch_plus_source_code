@@ -32,7 +32,7 @@ jobs:
           & "build/fingertip-x64/Release/touchplus_fingertip_tracker_selftest.exe"
           if ($LASTEXITCODE -ne 0) { throw "Phase 2B tracker x64 self-test failed: $LASTEXITCODE" }
 
-  landmark-oracle-probe:
+  landmark-guided-distal-probe:
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -43,12 +43,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run landmark arbitration self-test
-        shell: pwsh
-        run: |
-          python revival/tools/touchplus_landmark_probe.py --self-test
-          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9A landmark arbitration self-test failed: $LASTEXITCODE" }
-
       - name: Bootstrap official OpenCV Zoo landmark assets
         shell: pwsh
         run: |
@@ -56,6 +50,14 @@ jobs:
             -Python (Get-Command python).Source `
             -Assets "build/landmark-assets" `
             -Venv "build/landmark-venv"
+
+      - name: Run Phase 2B.9B distal-projection self-test
+        shell: pwsh
+        run: |
+          & "build/landmark-venv/Scripts/python.exe" `
+            revival/tools/touchplus_landmark_probe.py `
+            --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9B landmark-guided distal self-test failed: $LASTEXITCODE" }
 
       - name: Run OpenCV Zoo model-load smoke
         shell: pwsh
@@ -72,10 +74,16 @@ jobs:
             --input "build/blank-left.pgm" `
             --assets "build/landmark-assets" `
             --output "build/landmark-smoke"
-          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9A OpenCV Zoo model-load smoke failed: $LASTEXITCODE" }
-          $summary = Get-Content "build/landmark-smoke/landmark-summary.json" -Raw | ConvertFrom-Json
-          if ($summary[0].oracle_status -eq "ERROR") {
-            throw "Landmark model smoke returned ERROR: $($summary[0].reason)"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9B OpenCV Zoo model-load smoke failed: $LASTEXITCODE" }
+          $summary = Get-Content "build/landmark-smoke/landmark-guided-summary.json" -Raw | ConvertFrom-Json
+          if ($summary.results[0].guided_status -eq "ERROR") {
+            throw "Landmark model smoke returned ERROR: $($summary.results[0].reason)"
+          }
+          if ($summary.metric_z_source -ne "TOUCHPLUS_STEREO_ONLY") {
+            throw "Metric-depth ownership regressed: $($summary.metric_z_source)"
+          }
+          if ($summary.exact_tip_oracle_policy -ne "DISABLED_AFTER_2B9A_PHYSICAL_FAIL") {
+            throw "2B.9A exact-tip oracle must remain disabled"
           }
 
   phase2b-win32:
@@ -117,17 +125,17 @@ jobs:
           & $exe --self-test $cal
           if ($LASTEXITCODE -ne 0) { throw "Phase 1C depth self-test regressed: $LASTEXITCODE" }
 
-      - name: Prepare Phase 2B.9A landmark evaluation kit
+      - name: Prepare Phase 2B.9B landmark-guided distal kit
         shell: pwsh
         run: |
           $src = "build/revival-x86/Release"
-          $kit = "build/touchplus-phase2b9a-landmark-evaluation"
+          $kit = "build/touchplus-phase2b9b-landmark-guided-distal"
           New-Item -ItemType Directory -Force -Path $kit | Out-Null
           New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
 
-          # The physical tracker remains V8 geometry-first. 2B.9A adds an
-          # independent offline landmark probe; no DNN dependency enters the
-          # Etron Win32 process yet.
+          # The physical tracker remains the accepted V8 safety architecture.
+          # 2B.9B is still an offline anatomical evaluation: OpenCV/ONNX does
+          # not enter the Etron Win32 runtime and never owns metric Z.
           Copy-Item "$src/touchplus_depth_viewer.exe" "$kit/touchplus_phase2b_tracker.exe"
           if (Test-Path "$src/touchplus_calibration_capture.exe") {
             Copy-Item "$src/touchplus_calibration_capture.exe" "$kit/touchplus_landmark_capture.exe"
@@ -139,14 +147,15 @@ jobs:
           Copy-Item "revival/tools/touchplus_landmark_probe.py" "$kit/touchplus_landmark_probe.py"
           Copy-Item "revival/tools/setup-touchplus-landmark-probe.ps1" "$kit/setup-touchplus-landmark-probe.ps1"
           Copy-Item "revival/notes/phase2b8-physical-smoke-2026-08-20.md" "$kit/README-2B8-physical-smoke.md"
-          Copy-Item "revival/notes/phase2b9-landmark-oracle-evaluation.md" "$kit/README-2B9A-landmark-oracle.md"
+          Copy-Item "revival/notes/phase2b9-landmark-oracle-evaluation.md" "$kit/README-2B9A-physical-result.md"
+          Copy-Item "revival/notes/phase2b9b-landmark-guided-distal.md" "$kit/README-2B9B-guided-distal.md"
           Copy-Item "revival/notes/phase2b8-landmark-fallback-evaluation.md" "$kit/README-landmark-background.md"
           Get-ChildItem -Recurse $kit | Select-Object FullName,Length | Format-Table -AutoSize
 
-      - name: Upload Phase 2B.9A landmark evaluation kit
+      - name: Upload Phase 2B.9B landmark-guided distal kit
         uses: actions/upload-artifact@v4
         with:
-          name: touchplus-phase2b9a-landmark-evaluation-windows
-          path: build/touchplus-phase2b9a-landmark-evaluation/**
+          name: touchplus-phase2b9b-landmark-guided-distal-windows
+          path: build/touchplus-phase2b9b-landmark-guided-distal/**
           if-no-files-found: error
           retention-days: 30

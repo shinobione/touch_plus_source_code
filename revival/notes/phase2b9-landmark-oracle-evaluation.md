@@ -3,170 +3,157 @@
 Date: 2026-08-20  
 Physical unit: `0101007379`
 
-## Goal
+## Verdict
 
-Determine whether a modern hand-landmark model can reliably identify the **2D distal index tip** on real Touch+ imagery before adding any DNN runtime dependency to the stable Win32 Etron capture process.
+**MODEL RUNTIME PASS / EXACT INDEX-TIP ORACLE FAIL / DO NOT INTEGRATE LANDMARK 8 AS A HARD VETO**
 
-This slice is deliberately an **evaluation boundary**, not a replacement tracker.
+The OpenCV Zoo MediaPipe palm + hand-pose stack runs correctly on Touch+ captures and often recognizes the hand/index anatomy, but the raw `INDEX_FINGER_TIP` landmark is **not reliable enough as an exact distal-pixel oracle** on this sensor.
 
-## Why this boundary exists
+Raw personal imagery remains outside the repository. This note records only derived engineering observations from the user's local 2B.9A dataset.
+
+## Why this boundary existed
 
 Phase 2B.8 physically proved two important things:
 
 1. the temporal geometry safety gate can reject implausible identity changes before stereo;
 2. a correct index lock is possible, but geometry-only recall and continuity remain too intermittent.
 
-The next question is therefore not "which heuristic coefficient should change?" It is:
+2B.9A therefore asked whether a modern anatomical model could provide an independent exact 2D index-tip oracle without entering the stable Win32 Etron runtime.
 
-> does a modern anatomical landmark model generalize to the Touch+ image domain well enough to act as an independent 2D oracle/veto?
-
-## Candidate
+## Candidate tested
 
 The probe uses the official OpenCV Zoo MediaPipe models:
 
 - `palm_detection_mediapipe_2023feb.onnx`
 - `handpose_estimation_mediapipe_2023feb.onnx`
 
-and the official OpenCV Zoo Python preprocessing/postprocessing modules downloaded locally during setup.
+plus the official OpenCV Zoo Python pre/post-processing modules.
 
 The HandPose model estimates 21 hand landmarks after palm detection.
 
-## Hard architecture rules
+## Hard architecture rules retained
 
 The landmark probe:
 
-- consumes local LEFT-eye images only;
-- may output a 2D `INDEX_FINGER_TIP` hypothesis;
-- may compare that hypothesis with a geometry sidecar when available;
-- **never** supplies Touch+ metric Z;
-- **never** modifies `K/D/R/T/P/Q`;
-- **never** modifies the accepted surface frame;
-- **never** loosens the robust stereo matcher;
+- consumes local LEFT-eye images for the decision boundary;
+- never supplies Touch+ metric Z;
+- never modifies `K/D/R/T/P/Q`;
+- never modifies the accepted surface frame;
+- never loosens the robust stereo matcher;
 - does not run inside the Win32 Etron process in 2B.9A.
 
 Touch+ stereo/Q remains the only metric XYZ source.
 
-## Tools
+## Physical 2B.9A dataset result
 
-### `setup-touchplus-landmark-probe.ps1`
+The binding subset is the **10 LEFT-eye captures**.
 
-Creates a local Python virtual environment, installs:
-
-- NumPy;
-- OpenCV Python 4.10+;
-
-then downloads the official OpenCV Zoo:
-
-- `mp_palmdet.py`
-- `mp_handpose.py`
-- full-precision palm detector ONNX;
-- full-precision handpose ONNX.
-
-The ONNX downloads are SHA-256 checked.
-
-The int8 handpose model is intentionally not used because OpenCV Zoo warns that its accuracy can drop enough to produce invalid results.
-
-### `touchplus_landmark_probe.py`
-
-Processes one LEFT image or a directory of images.
-
-For each image it:
-
-1. finds palms;
-2. runs 21-landmark hand pose estimation;
-3. reads landmark 8 (`INDEX_FINGER_TIP`);
-4. applies a conservative 2D "index extended" sanity check;
-5. optionally compares the landmark tip with a geometry JSON sidecar;
-6. writes annotated images and `landmark-summary.json`.
-
-The current arbitration is diagnostic only.
-
-Possible statuses:
+Derived probe statistics:
 
 ```text
-AGREE_LOCKED
-AGREE_DIAGNOSTIC
-DISAGREE_VETO
-LANDMARK_ONLY_DIAGNOSTIC
-ORACLE_NON_INDEX_POSE
-ORACLE_UNAVAILABLE
-ERROR
+LEFT frames evaluated          : 10
+hand landmarks found           : 8 / 10
+index_extended_2d              : 7 / 8 detected hands
+ORACLE_NON_INDEX_POSE          : 1 / 10
+ORACLE_UNAVAILABLE             : 2 / 10
+median detected hand confidence: 0.9883
+minimum detected confidence    : 0.9271
 ```
 
-`DISAGREE_VETO` means only that a future live integration should prefer UNKNOWN when independent anatomy disagrees. It does not mutate the current V8 runtime.
+The raw detection numbers look encouraging, but visual anatomical review is the binding gate.
 
-## Local capture source
+### Confident exact-tip failures
 
-The evaluation kit also packages the existing persistent calibration-capture executable under the explicit name:
+Representative observations:
+
+- pair 001: hand confidence about `0.988`; index recognized, but landmark 8 is visibly **too proximal** on the index rather than at the distal fingertip;
+- pair 002: hand confidence about `0.998`; same failure class despite extremely high confidence;
+- pair 003: a visually extended index can become `ORACLE_NON_INDEX_POSE`;
+- pairs 004/005: index direction is often plausible, while the raw tip remains materially short of the visible distal boundary;
+- pairs 007–009 are better and can land near the true distal tip, but not consistently enough to satisfy the gate.
+
+Therefore:
+
+> **model confidence != exact distal-tip correctness**
+
+This is intentionally treated as the same class of engineering lesson learned earlier with stereo confidence: a subsystem can be internally confident while solving the wrong boundary for the product.
+
+## Why the original 2B.9A veto policy is retired
+
+The original candidate policy was:
 
 ```text
-touchplus_landmark_capture.exe
+geometry tip near landmark 8
+    -> strengthen identity
+
+geometry tip far from landmark 8
+    -> veto to UNKNOWN
 ```
 
-It is reused only because it already provides reliable persistent stereo capture and local PNG output. No checkerboard is required.
+The physical dataset disproves that policy.
 
-A recommended physical dataset is 8–12 single-index poses:
+A correct Touch+ geometry tip could be far from a **confident but proximal** landmark 8. Using raw landmark-tip distance as a hard veto could therefore reject the better candidate.
 
-- vertical;
-- horizontal left/right;
-- diagonal;
-- near/far;
-- modest palm translations;
-- at least two poses where geometry V8 previously struggled.
+From this point forward:
 
-Keep the whole hand visible.
+- raw landmark 8 is diagnostic only;
+- exact-tip distance is not allowed to veto V8 identity;
+- high hand-pose confidence cannot by itself publish or reject a fingertip;
+- model-relative Z remains ignored.
 
-## Physical acceptance gate for the oracle
+## What 2B.9A *did* prove useful
 
-The model is worth integrating only if real Touch+ LEFT imagery shows:
+The model often appears substantially more useful for **index anatomy and distal direction** than for the exact terminal pixel.
 
-- reliable palm/hand detection on clearly visible single-hand frames;
-- landmark 8 visually lands on the distal index tip, not knuckle/palm/wrist;
-- failures mostly become `ORACLE_UNAVAILABLE` rather than confident wrong tips;
-- orientation changes do not systematically swap index with another finger;
-- the result is materially more anatomically stable than geometry-only V8 in the difficult poses.
-
-A practical first threshold is at least **8/10 clearly visible single-index frames anatomically correct** before considering live integration.
-
-This is not a product accuracy claim; it is a go/no-go engineering gate for whether the oracle is worth integrating.
-
-## If the oracle passes
-
-Next slice: **2B.9B live landmark-assisted identity**.
-
-Preferred architecture:
+The promising information is the chain:
 
 ```text
-Win32 Touch+ geometry V8
-        |
-        +---- 2D candidate / palm state
-        |
-        v
-landmark oracle process (2D only)
-        |
-        +---- agree --------> identity evidence strengthened
-        |
-        +---- disagree -----> UNKNOWN
-        |
-        +---- unavailable --> geometry keeps its own conservative gates
-
-ONLY accepted identity
-        |
-        v
-existing Touch+ stereo refinement
-        |
-        v
-Xsurface / Ysurface / H
+INDEX_MCP -> INDEX_PIP -> INDEX_DIP -> approximate INDEX_TIP direction
 ```
 
-The exact IPC mechanism is intentionally deferred until the offline physical generalization test passes.
+Even when landmark 8 is too proximal, the model can still identify which anatomical branch is the index and which direction is distal.
 
-## If the oracle fails
+That motivates a different next slice rather than abandoning landmarks entirely.
 
-Do not integrate it. Preserve 2B.8 safety behavior and revisit the geometry/anatomical representation rather than adding an AI dependency that is unreliable on this sensor.
+## Next boundary: Phase 2B.9B — landmark-guided distal projection
+
+2B.9B does **not** trust landmark 8 as the endpoint.
+
+Instead:
+
+```text
+MediaPipe index anatomy
+MCP -> PIP -> DIP -> distal direction
+             |
+             v
+Touch+ learned-background appearance silhouette
+             |
+             v
+project along the anatomical distal corridor
+             |
+             v
+real visible silhouette boundary
+             |
+             v
+GUIDED 2D distal candidate
+```
+
+The DNN supplies **anatomical direction**. The Touch+ image silhouette supplies the **actual visible distal boundary**.
+
+Only after that concept passes physical evaluation should a later live integration be considered.
+
+## 2B.9A acceptance-gate result
+
+Original gate:
+
+> at least 8/10 clearly visible single-index LEFT frames with landmark 8 anatomically on the real distal tip.
+
+Result: **FAIL**.
+
+The model runtime itself is healthy, so the result is not an infrastructure failure. It is a domain/endpoint-representation failure.
 
 ## Merge rule
 
-PR #9 remains Draft / DO NOT MERGE.
+PR #9 remains **Draft / DO NOT MERGE**.
 
 Phase 2C touch/click remains blocked until fingertip identity is physically reliable.
