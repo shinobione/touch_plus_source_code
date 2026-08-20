@@ -1,12 +1,12 @@
 # Phase 2B — Hand / Fingertip 3D
 
-## Current slice: Phase 2B.9B — landmark-guided distal projection
+## Current slice: Phase 2B.9C.2 — frame-synchronous live anatomy fusion
 
 Physical unit: `0101007379`.
 
 Current status:
 
-**2B.8 PHYSICAL SAFETY PARTIAL PASS / 2B.9A EXACT-TIP ORACLE FAIL / 2B.9B SYNTHETIC CANDIDATE / DO NOT MERGE**
+**2B.9C.1 LIVE MAJOR PROGRESS / WRONG FINITE HIGH ON FAST POSE TRANSITION / 2B.9C.2 IMPLEMENTED CANDIDATE / DO NOT MERGE**
 
 Phase 2A already proved a useful working-surface frame on real hardware: bare table near `H=0`, 53 mm object measured about 54–55 mm. Phase 2B sits on top of that accepted metric stack; it does not modify camera calibration or the saved surface transform.
 
@@ -16,6 +16,11 @@ Binding evidence:
 - `revival/notes/phase2b8-physical-smoke-2026-08-20.md`
 - `revival/notes/phase2b9-landmark-oracle-evaluation.md`
 - `revival/notes/phase2b9b-landmark-guided-distal.md`
+- `revival/notes/phase2b9b-physical-smoke-2026-08-20.md`
+- `revival/notes/phase2b9b1-roi-reacquisition.md`
+- `revival/notes/phase2b9c1-live-anatomy-sidecar.md`
+- `revival/notes/phase2b9c1-physical-smoke-2026-08-20.md`
+- `revival/notes/phase2b9c2-frame-sync-anatomy.md`
 - `revival/notes/phase2b8-landmark-fallback-evaluation.md`
 
 Raw user physical photos/videos are intentionally not committed.
@@ -46,9 +51,12 @@ Do **not** change camera calibration, Q, the accepted surface transform, or ster
 9. **2B.7 palm-core branch PARTIAL PASS / fingertip FAIL** — SCOPA-inspired palm-first decomposition improved diagnostics, but a single index could still be re-elected as materially different pixels across adjacent frames.
 10. **2B.8 temporal palm/branch identity PHYSICAL PARTIAL PASS** — large identity jumps can now be rejected before stereo, and correct locks exist, but recall/continuity remain too intermittent for merge.
 11. **2B.9A OpenCV Zoo landmark probe RUNTIME PASS / EXACT-TIP ORACLE FAIL** — hand landmarks run well on Touch+ imagery, but raw landmark 8 can be confidently too proximal.
-12. **2B.9B landmark-guided distal projection CANDIDATE** — model supplies index anatomy/direction; Touch+ appearance silhouette supplies the actual visible distal boundary. Physical validation pending.
+12. **2B.9B landmark-guided distal projection PHYSICAL PARTIAL PASS** — all five published guided points in the first physical dataset were plausible, but recall was only 5/10.
+13. **2B.9B.1 silhouette ROI reacquisition PHYSICAL/OFFLINE DATASET PASS** — same physical dataset improved to 8/10 guided distal, 0 observed wrong published tips, 2 safe rejects.
+14. **2B.9C.1 live anatomical sidecar PHYSICAL PARTIAL PASS / HARD FAIL** — live full-frame/ROI anatomy and anatomy-only rescue work, but a one-frame-old result during fast pose rotation produced a wrong finite HIGH fingertip.
+15. **2B.9C.2 frame-synchronous anatomy IMPLEMENTED CANDIDATE** — source/current silhouette + palm snapshots align age>0 anatomy to the current frame, then require a current distal boundary before fusion/stereo.
 
-## Critical identity lesson
+## Critical identity lessons
 
 Representative 2B.7 physical sequence:
 
@@ -58,11 +66,37 @@ Representative 2B.7 physical sequence:
 
 The downstream stereo matcher could report MEDIUM/HIGH for these selected pixels, but the imagery did not support treating the final jump as the same distal index.
 
-Therefore:
+2B.9C.1 exposed the asynchronous equivalent:
+
+```text
+source frame N: valid distal anatomy
+runtime frame N+1: hand rotates/foreshortens
+old tip still lies inside current hand silhouette
+2B.9C.1 anatomy-only gate passes
+stereo HIGH measures the wrong current anatomical pixel
+```
+
+Representative blocker from the physical live smoke:
+
+```text
+anatomy=GUIDED_DISTAL/LOCKED/HIGH
+src=ROI_3
+age=1
+fusion=ANATOMY_ONLY/HIGH
+stereo=HIGH
+tip_pixel=435,167
+support=6
+final_confidence=HIGH
+XYZ=(61.1,-92.4,H=86.0) mm
+```
+
+Visual review showed that `435,167` was no longer the current distal index.
+
+Therefore both rules remain binding:
 
 > **stereo refinement confidence != fingertip identity confidence**
 
-2B.8 moved identity continuity before stereo so a bad anatomical jump can become `UNKNOWN` before NCC/stereo gives it metric legitimacy.
+> **wrong finite/HIGH fingertip = BLOCKER; UNKNOWN is acceptable when identity is uncertain**
 
 ## Phase 2B.8 safety architecture retained
 
@@ -91,40 +125,11 @@ persistent branch association
 UNKNOWN -> ACQUIRING -> LOCKED
         |
         +---- unstable / ambiguous ----> UNKNOWN
-        |
-        v
-ONLY LOCKED identity reaches stereo
-        |
-        v
-identity_confidence + stereo_confidence
-        |
-        v
-finite XYZ only if BOTH pass
 ```
 
-### 2B.8 physical result
+Only identity that survives the active anatomy/fusion gate may reach stereo.
 
-What passed on real hardware:
-
-- learned empty scene can remain no-hand with `changed_cells=0`;
-- `tip-jump-reject`, `palm-temporal-reject`, `branch-association-reject`, `ambiguous-branch` and `no-finger-like-branch` occur physically;
-- representative large tip residual around `107.9` became `UNKNOWN` with `stereo_confidence=NOT_RUN`;
-- a real single-index pose reached a plausible `LOCKED / HIGH identity / HIGH stereo` state.
-
-What remains blocked:
-
-- obvious index poses still spend too long in acquiring/unknown states;
-- finite anatomical correctness is not yet certified across the whole motion set.
-
-Binding project rule:
-
-> one anatomically wrong finite MEDIUM/HIGH fingertip is a blocker
-
-and:
-
-> UNKNOWN is acceptable when identity is uncertain
-
-## Phase 2B.9A — what the modern landmark probe actually proved
+## Phase 2B.9A — exact landmark endpoint is not ground truth
 
 The official OpenCV Zoo MediaPipe PalmDet + HandPose stack was tested offline on Touch+ LEFT imagery.
 
@@ -140,154 +145,175 @@ median detected hand confidence: 0.9883
 minimum detected confidence    : 0.9271
 ```
 
-But visual review showed multiple confident raw `INDEX_FINGER_TIP` landmarks were materially **too proximal** on the index. One capture was around `0.998` confidence while still missing the real distal boundary.
-
-Therefore the original hard-veto proposal is retired:
-
-```text
-raw landmark 8 far from V8 tip
-    != automatic veto
-```
-
-A good Touch+ geometry/silhouette endpoint must not be rejected merely because a confident model endpoint is short.
-
-From 2B.9A onward:
+Visual review showed several confident raw `INDEX_FINGER_TIP` landmarks materially too proximal. Therefore:
 
 - raw landmark 8 is diagnostic only;
 - model confidence does not certify endpoint correctness;
 - model Z is never Touch+ metric Z;
-- exact-tip distance cannot publish or veto identity by itself.
+- exact landmark-tip distance cannot by itself publish or veto identity.
 
-## Phase 2B.9B — landmark-guided distal projection
+## Phase 2B.9B / 2B.9B.1 — anatomy direction + Touch+ distal boundary
 
-The useful part of the model appears to be **which anatomical branch is the index and which way is distal**.
-
-2B.9B therefore uses:
+The useful model evidence is the index chain and distal direction:
 
 ```text
-MediaPipe INDEX chain
-MCP -> PIP -> DIP -> approximate TIP direction
-        |
-        v
-index distal axis + coherence
-        |
-        +-------------------------------+
-                                        |
-Touch+ clean LEFT background            |
-        +                               |
-current LEFT frame                      |
-        |                               |
-        v                               |
-V5-style appearance silhouette          |
-        |                               |
-        +-------------------------------+
-                        |
-                        v
-             narrow distal corridor
-                        |
-                        v
-       continuous real silhouette boundary
-                        |
-                        v
-                 GUIDED_DISTAL
+INDEX_MCP -> INDEX_PIP -> INDEX_DIP -> distal direction
+                         |
+                         v
+Touch+ appearance silhouette
+                         |
+                         v
+continuous distal corridor
+                         |
+                         v
+GUIDED_DISTAL
 ```
 
-The model does not own the terminal pixel. The Touch+ silhouette does.
-
-### 2B.9B safety rules
-
-A guided 2D distal point requires:
-
-- hand-pose confidence >= 0.80;
-- conservative extended-index check;
-- coherent MCP/PIP/DIP/TIP phalanx directions;
-- a changed Touch+ silhouette overlapping the hand landmarks;
-- continuous support from around `INDEX_DIP` through a narrow distal corridor;
-- no detached tail stealing the endpoint after a real gap.
-
-Safe failures are:
+2B.9B physical result:
 
 ```text
-GUIDED_REJECTED
-GUIDED_UNAVAILABLE
+GUIDED_DISTAL correct : 5 / 10
+wrong guided distal   : 0 / 10
+safe reject/unavail   : 5 / 10
 ```
 
-A confidently wrong `GUIDED_DISTAL` is a blocker.
-
-### Exact-tip oracle is explicitly disabled
-
-2B.9B outputs:
+2B.9B.1 added silhouette-ROI landmark reacquisition. Replaying the same physical dataset produced:
 
 ```text
-exact_tip_oracle_policy=DISABLED_AFTER_2B9A_PHYSICAL_FAIL
-metric_z_source=TOUCHPLUS_STEREO_ONLY
+GUIDED_DISTAL                : 8 / 10
+visually plausible published : 8 / 8
+wrong guided tips observed   : 0 / 8
+GUIDED_REJECTED              : 2 / 10
+GUIDED_UNAVAILABLE           : 0 / 10
 ```
 
-The raw model tip may be drawn for diagnosis but is not the authority.
+ROI reacquisition rescued pairs 007, 008 and 010. Pair 011 remains a broad fist/knuckle fail-closed regression.
 
-### Synthetic regressions
+## Phase 2B.9C.1 — live sidecar result
 
-The 2B.9B self-test models the 2B.9A physical failure class:
+OpenCV/ONNX stays outside the Win32 Etron process. Named shared memory carries only LEFT grayscale, Touch+ silhouette and a 2D result. Touch+ stereo/Q remains the only metric XYZ source.
 
-- hand confidence near `0.998`;
-- model tip deliberately ~28–30 px too proximal;
-- correct distal axis;
-- silhouette continues to the real fingertip;
-- expected result: guided projection reaches the silhouette boundary instead of stopping at landmark 8.
+The physical live smoke proved:
 
-Additional regressions cover:
+- launcher paths with spaces PASS;
+- Python sidecar and shared-memory IPC PASS;
+- full-frame anatomy PASS;
+- ROI reacquisition works live;
+- plausible `GEOMETRY+ANATOMY` publication exists;
+- plausible `ANATOMY_ONLY` publication exists;
+- disagreement/reject/jump/palm gates fail closed.
 
-- diagonal projection;
-- contradictory phalanx directions -> reject;
-- no silhouette -> unavailable;
-- non-index pose -> reject.
+But a fast pose transition produced the wrong finite HIGH age-1 anatomy-only result documented above. 2B.9C.1 is therefore **DO NOT MERGE**.
 
-Synthetic PASS is necessary but not physical acceptance.
+## Phase 2B.9C.2 — frame-synchronous anatomy
 
-## 2B.9B physical gate
+2B.9C.2 retains a short history of:
 
-The evaluation dataset should be one persistent capture session:
+```text
+frame_id
+current Touch+ selected silhouette
+V8 palm center
+V8 palm radius
+```
 
-1. first LEFT frame = clean background, no hand;
-2. ten subsequent single-index poses.
+An age>0 anatomy observation must now resolve its source frame and survive:
 
-The evaluator uses `--background-first` and defaults to LEFT-only images.
+1. source/current palm validity;
+2. bounded palm translation;
+3. bounded palm scale change;
+4. aligned silhouette shape overlap;
+5. source-tip transport into the current frame by palm translation/scale;
+6. **current-distal validation** on the transported point.
 
-Physical acceptance requires:
+Current-distal validation requires the point to be near the current silhouette boundary, with silhouette support inward along the anatomical axis and clear space outward. Merely being somewhere inside the hand is no longer enough.
 
-1. at least **8/10** obvious single-index poses produce a guided distal marker visually on the actual fingertip boundary;
-2. successful guided tips materially improve the proximal landmark-8 failures seen in 2B.9A;
-3. failures prefer `GUIDED_REJECTED` / `GUIDED_UNAVAILABLE`;
-4. no confident guided point lands on another finger, knuckle, wrist, or detached appearance tail;
-5. orientation/translation changes do not systematically break index identity.
+Possible sync diagnostics include:
 
-The green/raw model tip is no longer the judge. The guided silhouette-boundary point is the judge.
+```text
+CURRENT
+MOTION_COMPENSATED
+MISSING_SOURCE_FRAME
+PALM_INVALID
+PALM_MOTION_TOO_LARGE
+PALM_SCALE_CHANGED
+SHAPE_CHANGED
+TIP_NOT_CURRENT_DISTAL
+TOO_OLD
+```
 
-## If 2B.9B passes
+Relevant fail-closed fusion reasons:
 
-Next controlled slice: **2B.9C live anatomical sidecar integration**.
+```text
+anatomy-stale-motion
+anatomy-not-current-distal
+anatomy-only-too-old
+anatomy-only-sync-shape-weak
+```
 
-Constraints remain:
+`ANATOMY_ONLY` is deliberately stricter:
 
-- V8 stays the temporal palm/branch safety gate;
-- DNN anatomy may supply index identity/direction, not Z;
-- Touch+ live silhouette owns distal boundary placement;
-- disagreement/uncertainty -> `UNKNOWN`;
-- only accepted 2D identity reaches existing stereo refinement;
-- metric smoothing remains scoped to the locked branch ID;
-- `K/D/R/T/P/Q`, Phase 2A surface and stereo gates remain unchanged.
+- age 0 can publish after normal gates;
+- age 1 can publish only after motion compensation + current-distal validation + strong shape overlap;
+- age >1 cannot publish anatomy-only;
+- synchronized age <=2 anatomy may still participate in `GEOMETRY+ANATOMY` agreement because current V8 geometry supplies an independent current-frame check.
 
-The IPC/runtime mechanism is intentionally deferred until the 2B.9B physical projection gate passes.
+## 2B.9C.2 physical regression encoded in CI
+
+The synthetic fusion test models the actual failure class:
+
+```text
+old 2B.9C.1 gate:
+old tip still near current hand = PASS
+
+new 2B.9C.2 gate:
+same old tip no longer current distal
+-> TIP_NOT_CURRENT_DISTAL / reject
+-> UNKNOWN
+-> stereo must not legitimize it
+```
+
+The test also preserves a safe age-1 translation case where the same hand simply moves slightly and the compensated fingertip remains a real distal boundary.
+
+Synthetic/CI success is necessary but not physical acceptance.
+
+## Hard ownership
+
+```text
+metric_z_source          = TOUCHPLUS_STEREO_ONLY
+raw landmark 8           = DIAGNOSTIC ONLY
+OpenCV/ONNX in Etron EXE = NO
+K/D/R/T/P/Q              = UNCHANGED
+Phase 2A surface frame   = UNCHANGED
+stereo matcher           = UNCHANGED
+```
+
+## Physical gate for 2B.9C.2
+
+The next live smoke must retain the previously good static/slow cases and deliberately stress quick orientation changes, especially right/left -> frontal/foreshortened.
+
+Required:
+
+1. plausible `GEOMETRY+ANATOMY` and ROI/anatomy-only fingertip cases still occur;
+2. stable age-1 translation may show `MOTION_COMPENSATED` and remain valid;
+3. rapid pose changes prefer `TIP_NOT_CURRENT_DISTAL`, `SHAPE_CHANGED`, another sync reject, or `UNKNOWN`;
+4. no finite MEDIUM/HIGH result may land on a non-distal hand pixel;
+5. HIGH stereo must never override failed identity/synchronization.
 
 ## Diagnostics / merge rule
 
-The physical V8 runtime remains:
+Runtime banner:
 
 ```text
-[TRACK] PHASE 2B.8 RUNTIME ACTIVE | tracker=TEMPORAL-PALM-BRANCH-ID
+[TRACK] PHASE 2B.9C.2 RUNTIME ACTIVE | tracker=V8+FRAME-SYNC-ANATOMY
 ```
 
-2B.9B is an offline evaluator and does **not** claim to replace that runtime yet.
+Overlay:
+
+```text
+cyan    = V8 palm
+white   = V8 geometry candidate
+magenta = frame-synchronized landmark-guided distal candidate
+```
 
 PR #9 remains **Draft / DO NOT MERGE**.
 
