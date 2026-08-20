@@ -1,41 +1,117 @@
-# TouchPlus Revival — Option B
+# TouchPlus Revival
 
 This directory is the modern revival path for the Ractiv Touch+ hardware.
 
-The goal is **not** to recreate the abandoned 2015 desktop application. The Touch+ is treated as a reusable stereo/IMU sensor and a new runtime is built around it.
+The goal is **not** to recreate the abandoned 2015 desktop application. The Touch+ is treated as a reusable stereo/IMU sensor and a new runtime is being built around its validated hardware-specific behavior.
 
-## Canonical hardware facts recovered from the original code
+Canonical integration branch: **`revival/main`**.
 
-- USB VID: `1E4E`
-- USB PID: `0107`
-- Windows friendly name used by the legacy stack: `Touch+ Camera`
-- Expected video transport: UVC/MJPEG
-- Expected combined frame: `1280x480`
-- Logical stereo split: `640x480` left + `640x480` right
-- Original target rate: up to `60 fps`
-- Hardware also exposes accelerometer, exposure/gain controls, GPIO/LED control and flash/serial access through vendor-specific controls.
+Canonical resume point: **`revival/REVIVAL-ROADMAP.md`**.
 
-## Confirmed physical-device smoke — 2026-08-19
+## Current physical status — 2026-08-20
 
-The original physical Touch+ has now been exercised successfully on modern Windows.
+Physical unit: **serial `0101007379`**.
 
-Confirmed on real hardware:
+The hardware, stereo geometry, metric depth and working-surface frame are all physically validated. The active blocker is now **fingertip identity**, not camera access or metric reconstruction.
 
-- Windows enumerates the device as `USB\VID_1E4E&PID_0107`;
-- the composite parent is healthy and the child camera interface appears as `Touch+ Camera` / `MI_00`;
-- the recovered 32-bit Etron control stack initializes successfully;
-- `eSPAEAWB_EnumDevice` sees the Touch+ alongside another webcam;
-- `eSPAEAWB_SelectDevice` and `eSPAEAWB_SetSensorType(1)` succeed;
-- `eSPAEAWB_SWUnlock(0x0107)` returns success;
-- exposure/global-gain calls return successfully;
-- the accelerometer returns live values;
-- immediately after `SWUnlock`, Windows Camera displays a real live image from the Touch+.
+### Merged / accepted
 
-The live-image test is reproducible. If Windows Camera switches away to another webcam and then returns to Touch+, the Touch+ may fall back to a uniform gray stream. Re-running the software unlock and then immediately opening Touch+ Camera restores real video. This strongly indicates that the useful sensor state is volatile across stream/session transitions.
+- **Phase 0 — Hardware Probe / Atomic Capture**
+  - `VID_1E4E / PID_0107`, friendly name `Touch+ Camera`;
+  - Etron init/select, `SWUnlock(0x0107)`, IMU, exposure/gain and GPIO/LED access;
+  - persistent real stereo capture;
+  - combined `1280x480` frame split into `640x480` LEFT + RIGHT.
 
-**Consequence for the revival:** the production runtime must own the sequence atomically: vendor unlock/configuration first, then immediate video-open, without depending on another camera application.
+- **Phase 1A — Stable Stereo Viewer**
+  - persistent live viewer;
+  - historical Ractiv vertical flip reproduced;
+  - GDI flicker fixed;
+  - 60 fps mode is advertised/negotiated, but this hardware/driver path physically delivers about **30 fps**.
 
-This closes the major hardware viability question: the recovered Touch+ is not a dead device. Its camera path, vendor control path and IMU are all alive.
+- **Phase 1B.1 — Factory identity recovery**
+  - serial `0101007379` recovered from device flash;
+  - historical cloud key `7379` derived;
+  - factory CDN confirmed unavailable.
+
+- **Phase 1B.2a — Persistent local calibration capture**
+  - persistent Win32 capture tool;
+  - 20 synchronized physical checkerboard pairs captured.
+
+- **Phase 1B.2b — Robust local stereo calibration solver**
+  - 17 robust final inlier pairs;
+  - baseline **59.953 mm**;
+  - mono RMS LEFT **0.3472 px**, RIGHT **0.3912 px**;
+  - stereo RMS **0.3799 px**;
+  - rectified vertical epipolar mean **0.1195 px**, p95 **0.3096 px**, max **1.2763 px**.
+
+- **Phase 1C — Metric depth / live depth**
+  - physical 350/600 mm delta preserved within about **+0.82%**;
+  - hardened point matcher uses texture gate, NCC, uniqueness, LEFT↔RIGHT consistency, local consensus and temporal rejection;
+  - `P` locked probe reports valid %, median Z, MAD and confidence;
+  - a fixed planar target produced `R²≈0.9984`, RMS residual `≈0.41 mm`, max residual `≈0.57 mm`;
+  - low-texture points are rejected rather than fabricated.
+
+- **Phase 2A — Working-surface frame**
+  - camera calibration remains immutable;
+  - per-setup surface transform is stored separately as `surface/<serial>.json`;
+  - accepted physical fit: 19 samples / 17 inliers, RMS **0.924 mm**, max residual **2.021 mm**, coverage **403.9 × 356.9 mm**;
+  - bare-table H checks remain around zero (`-0.9` to `+2.6 mm` across seven valid locations);
+  - a rigid 53 mm object measured **54.1 mm** and **55.3 mm**.
+
+## Active: Phase 2B — hand / fingertip 3D
+
+Active branch: `revival/phase2b-fingertip-3d`.
+
+Active PR: **#9**, Draft / **DO NOT MERGE**.
+
+Current experimental slice: **Phase 2B.7 — SCOPA-inspired palm-core finger branch tracking**.
+
+### Phase 2B progression
+
+- 2B.1 proved runtime wiring but produced giant false hand components;
+- 2B.2 hardened segmentation and removed the 20k-cell foreground failure;
+- 2B.3 geodesic identity still confused wrist/scene endpoints;
+- 2B.4 learned background dramatically improved no-hand rejection;
+- 2B.5 decoupled 2D appearance silhouette from dense-depth availability so low-texture distal skin remains visible;
+- 2B.6 support-bounded skeleton added safer ambiguity handling but still emitted anatomically wrong HIGH-confidence points;
+- 2B.7 added a SCOPA-inspired palm core and finger-branch model.
+
+Latest physical 2B.7 smoke: **PARTIAL PASS / FINGERTIP IDENTITY FAIL**.
+
+The useful wins are now stable:
+
+- background learning works;
+- empty learned scenes can remain no-hand;
+- the hand silhouette is much cleaner than early Phase 2B attempts;
+- physical support bounding rejects long appearance-only tails;
+- palm/branch telemetry exposes what the identity stage is doing;
+- multi-branch ambiguity can fail safe.
+
+The remaining blocker is precise:
+
+> A single clearly extended index can still be assigned different `tip_pixel` candidates on adjacent frames, and the robust stereo matcher can then report MEDIUM/HIGH confidence for the **wrong anatomical pixel**.
+
+Metric confidence and identity confidence are therefore not yet the same thing.
+
+Detailed note:
+
+- `revival/notes/phase2b-fingertip-3d.md`
+- `revival/notes/phase2b7-physical-smoke-2026-08-20.md` on the active PR branch.
+
+### Next identity boundary
+
+Do not loosen the metric matcher. Preserve the accepted camera/depth/surface/background layers and strengthen only the 2D identity stage:
+
+- validate palm core before branch scoring;
+- keep short temporal palm persistence;
+- persist branch identity instead of re-electing a fingertip every frame;
+- require finger-like geometry leaving the palm boundary;
+- reject unexplained 2D fingertip jumps;
+- separate **identity confidence** from **stereo refinement confidence**;
+- return `unknown` whenever identity is unstable;
+- compare the controlled geometry path against a lightweight modern 2D hand-landmark fallback before adding more endpoint heuristics.
+
+Temporal smoothing may stabilize a correct candidate, but must never hide a wrong branch choice.
 
 ## Architecture
 
@@ -43,168 +119,111 @@ This closes the major hardware viability question: the recovered Touch+ is not a
 Touch+ hardware
       |
       v
-[ Sensor Layer ]  UVC video + USB controls + IMU
+[ Sensor Layer ]  Etron unlock + UVC/DirectShow capture + IMU
       |
       v
-[ Stereo Layer ]  calibration + rectification + depth/triangulation
+[ Stereo Layer ]  per-device calibration + rectification + disparity/Q
       |
       v
-[ Tracking Layer ] modern hand landmarks / object landmarks
+[ Surface Layer ] working-surface transform -> Xsurface / Ysurface / H
       |
       v
-[ Fusion Layer ]  left/right association + 3D coordinates + smoothing
+[ Identity Layer ] background + appearance silhouette + hand/palm/finger identity
       |
       v
-[ Runtime API ]   pointer / gestures / OSC / MIDI / WebSocket / Unity
+[ Metric Tracking ] robust LEFT<->RIGHT refinement + smoothing/confidence
+      |
+      v
+[ Runtime API ] pointer / touch / gestures / OSC / MIDI / apps
 ```
 
-The legacy Ractiv algorithms remain valuable as documentation and as a fallback reference, but new code should depend on them only where they provide hardware-specific knowledge that cannot be replaced cleanly.
+The legacy Ractiv algorithms remain valuable as hardware documentation and as a source of algorithmic ideas. They are not imported wholesale into the modern runtime.
 
-## Phase 0-preflight — raw Windows USB/PnP probe
+## Important physical facts
 
-A device that fails USB enumeration never reaches Media Foundation and therefore cannot appear in the camera probe. `touchplus_usb_probe.exe` inspects present USB devnodes through SetupAPI/Configuration Manager instead of the video stack.
+- USB VID/PID: `1E4E:0107`;
+- sensor family recovered from original code: `OV7740`;
+- useful video state is session-sensitive;
+- reliable software must unlock and keep the stream open in one controlled process;
+- canonical orientation uses the historical vertical flip;
+- accepted real capture baseline is ~30 fps;
+- moving the Touch+ base or its mechanical pitch hinge requires **surface-frame recalibration**, not stereo recalibration.
 
-It reports:
-
-- any visible `VID_1E4E&PID_0107` Touch+ identity;
-- USB descriptor-failure / `USB\\UNKNOWN` style nodes;
-- Windows PnP problem codes including Code 43;
-- instance ID, hardware IDs, location, service and parent device when available.
-
-Run:
-
-```powershell
-.\build\revival\Release\touchplus_usb_probe.exe
-```
-
-Use `--all` only when the filtered output is not enough:
-
-```powershell
-.\build\revival\Release\touchplus_usb_probe.exe --all
-```
-
-For an unidentified Code 43 device, perform a correlation test: run the probe with the Touch+ unplugged, then plug it in and run again. If the `[USB-FAIL]` node appears/disappears with the sensor, we have identified the physical Touch+ even though Windows cannot yet read its VID/PID.
-
-## Phase 0A — Windows UVC hardware probe
-
-The camera executable deliberately uses **only Windows Media Foundation and WIC**. It does not depend on OpenCV 2.4, the old Ractiv UI, SFML, or the Etron DLLs.
-
-It must prove four things on the real device:
-
-1. Windows enumerates the Touch+ as `VID_1E4E&PID_0107` (or by the `Touch+ Camera` friendly name).
-2. The camera exposes a native `1280x480` video mode.
-3. A frame can be captured through the standard Windows video stack.
-4. The combined frame can be split into two `640x480` eye images.
-
-Successful capture writes:
-
-```text
-touchplus-probe/
-  touchplus-full.png
-  touchplus-left.png
-  touchplus-right.png
-```
-
-### Build on Windows
+## Build
 
 Requirements:
 
-- Windows 10 or Windows 11
-- Visual Studio 2022 Build Tools or Visual Studio 2022 with the Desktop C++ workload
-- CMake 3.23+
+- Windows 10/11;
+- Visual Studio 2022 Build Tools or newer with Desktop C++ workload;
+- CMake 3.23+.
 
-From a Developer PowerShell:
-
-```powershell
-cmake -S revival -B build/revival -A x64
-cmake --build build/revival --config Release
-```
-
-Then connect the Touch+ and run:
+Physical-device Win32 build:
 
 ```powershell
-.\build\revival\Release\touchplus_usb_probe.exe
-.\build\revival\Release\touchplus_probe.exe --list
-.\build\revival\Release\touchplus_probe.exe
+cmake -S revival -B build/revival-x86 -A Win32
+cmake --build build/revival-x86 --config Release
 ```
 
-`touchplus_probe.exe --list` is safe and only enumerates video devices. Running the camera probe without arguments attempts one real frame capture.
+The historical Etron vendor stack is 32-bit, so **Win32 is the physical-device target that matters**.
 
-## Phase 0B — vendor control probe
+x64 is still useful for pure math/self-tests where hardware DLLs are not required.
 
-`revival/tools/touchplus-unlock.ps1` uses the recovered Win32 Etron DLLs to validate the vendor-specific control plane independently from the video capture code.
+## Runtime artifacts / calibration separation
 
-Confirmed on the physical device:
+Per-device camera calibration:
 
-- Etron initialization and device enumeration;
-- Touch+ selection;
-- OV7740/sensor type selection (`1`);
-- `SWUnlock(0x0107)`;
-- exposure and global-gain access;
-- accelerometer access;
-- real live video becomes available immediately after unlock.
-
-The optional `-LegacyInit` path reproduces the recovered Ractiv initializer: disable AE/AWB, LEDs on, 15 ms exposure, global gain 1.0 and color gains 2/1/2.
-
-## Phase 0C — atomic unlock + capture
-
-Next canonical implementation step:
-
-1. run the Etron unlock/control sequence;
-2. keep control of the same Touch+ session;
-3. immediately enumerate/open the video stream;
-4. select the native `1280x480` mode;
-5. capture and persist a frame;
-6. split and verify `640x480` left/right images;
-7. then keep the stream alive for a minimal stereo viewer.
-
-This phase must not depend on Windows Camera or another application that can close/reopen the device and lose the volatile unlocked/configured state.
-
-## Planned phases
-
-### Phase 1 — stereo foundation
-
-- modern OpenCV calibration/rectification;
-- verify left/right orientation and baseline;
-- persist calibration per physical Touch+ serial;
-- produce a live rectified stereo viewer;
-- triangulate known points and measure error.
-
-### Phase 2 — modern hand tracking
-
-Prototype modern 2D hand landmarks independently on each eye, then associate the same landmarks across both images and triangulate them into 3D.
-
-Target output per hand:
-
-```json
-{
-  "hand": "right",
-  "confidence": 0.97,
-  "landmarks": [
-    {"id": 0, "x": 0.0, "y": 0.0, "z": 0.0}
-  ]
-}
+```text
+calibration/<serial>.json
 ```
 
-The exact inference backend is intentionally not frozen yet. It should be chosen after the real sensor imagery from Phase 0/1 is available.
+Per-setup working-surface transform:
 
-### Phase 3 — TouchPlus Runtime
+```text
+surface/<serial>.json
+```
 
-One stable device/runtime API, with adapters for:
+Do not copy one over the other simply because both use the same serial filename.
 
-- Windows pointer/touch injection;
-- gestures and hotkeys;
-- OSC;
-- MIDI;
-- WebSocket/local API;
-- Unity/Unreal or custom apps.
+`K/D/R/T/P/Q` are camera/stereo calibration. The surface JSON is a separate camera-to-work-plane transform.
 
-## Historical branches
+## Runtime controls currently layered into the depth/tracking viewer
 
-- `master` — Jerry's historical July 2015 fork, preserved untouched.
-- `archive/ractiv-2015-12-01` — last known Ractiv source state, imported as a read-only historical baseline.
-- `revival/option-b-phase0` — active modern revival branch.
+Accepted lower-layer controls include:
 
-## Rule for the revival
+- `D` — depth view;
+- `S` — rectified stereo view;
+- `P` — locked metric depth probe;
+- `C` — capture one surface calibration point;
+- `F` — fit/save surface frame;
+- `R` — reset pending surface points;
+- `U` — undo last pending surface point;
+- `H` — print surface-relative coordinates/height;
+- `Q` / `ESC` — quit.
 
-Do not modernize the whole 2015 application tree. Build a narrow, testable modern stack next to it, and pull legacy code across only when it teaches us something hardware-specific.
+Phase 2B adds:
+
+- `B` — learn/relearn clean background;
+- `T` — tracking ON/OFF.
+
+## Repository branches
+
+- `master` — historical fork preserved;
+- `archive/ractiv-2015-12-01` — final known Ractiv code snapshot imported as archive;
+- `revival/main` — canonical modern integration branch;
+- `revival/phase2b-fingertip-3d` — active experimental tracking branch / PR #9.
+
+## Rules for the revival
+
+- never reuse the deprecated repeated PowerShell one-shot calibration workflow;
+- raw personal calibration/test images and videos are evidence only and must not be committed publicly;
+- do not reopen the 60 fps investigation unless functionality genuinely requires it;
+- do not mutate accepted camera calibration to compensate for setup/surface changes;
+- low confidence must become `unknown`, never a fake finite fingertip/touch;
+- do not merge Phase 2B from synthetic CI alone — physical fingertip identity is the gate;
+- verify GitHub state and latest Actions artifacts when resuming; do not rely on old chat download links.
+
+## Historical reference
+
+The old Ractiv application can still be studied for its camera control, calibration, SCOPA/HandResolver logic and runtime intent. The modern revival deliberately avoids rebuilding the complete 2015 UI/process stack.
+
+The project has already passed the hardware viability question. The current engineering problem is now narrow and measurable: **turn a validated stereo/depth/surface system into a reliably identified fingertip before touch semantics are attempted.**
