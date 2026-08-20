@@ -57,19 +57,16 @@ int main() {
         }
     }
 
-    // REAL-VIDEO REGRESSION: the one dominant index points diagonally down-right.
-    // The distal ~35 half-res cells have appearance only (low-texture skin), so
-    // a depth-only tracker cannot see the visible fingertip.
+    // REAL-VIDEO REGRESSION: one dominant index points diagonally down-right.
+    // The distal part deliberately has no dense support.
     thick_line(appearance, 165, 124, 222, 198, 5, 76);
     thick_line(support,    165, 124, 191, 158, 4, 36);
 
-    // Short folded-finger branch: must lose to the dominant index.
+    // Short folded-finger branch.
     thick_line(appearance, 146, 122, 132, 154, 5, 34);
     thick_line(support,    146, 122, 136, 145, 4, 24);
 
-    // V5 physical failure: a connected appearance-only shadow/tail runs far
-    // down-left from the palm. It must be truncated by physical-support distance
-    // and must never become the fingertip just because it reaches the frame low.
+    // Long connected appearance-only tail.
     thick_line(appearance, 150, 124, 58, 218, 5, 96);
 
     const auto bounded = touchplus::tracking::constrain_to_physical_support_v6(
@@ -84,9 +81,7 @@ int main() {
         std::abs(tip.gx - 222) <= 9 &&
         std::abs(tip.gy - 198) <= 9;
 
-    // Multi-finger safety regression: two similarly long distal branches are
-    // deliberately ambiguous. V6 must return unknown instead of arbitrarily
-    // choosing one of them.
+    // Multi-finger safety regression.
     std::vector<uint8_t> ambiguous_mask(cells, 0);
     std::vector<uint8_t> ambiguous_support(cells, 0);
     for (int y = 18; y <= 82; ++y) {
@@ -118,8 +113,7 @@ int main() {
     const bool ambiguity_rejected = ambiguous_bounded.valid &&
         !ambiguous_tip.valid && ambiguous_tip.ambiguous;
 
-    // No-hand regression: tiny photometric patch with a few support cells must
-    // stay below the accepted physical hand boundary.
+    // No-hand regression.
     std::vector<uint8_t> noise(cells, 0);
     std::vector<uint8_t> noise_support(cells, 0);
     for (int y = 20; y < 28; ++y) {
@@ -142,7 +136,11 @@ int main() {
         << "far shadow removed       : " << far_shadow_removed << "\n"
         << "diagonal tip recovered   : " << diagonal_tip_recovered << "\n"
         << "equal branches ambiguous : " << ambiguity_rejected << "\n"
-        << "small noise rejected     : " << (!noise_bounded.valid) << "\n";
+        << "small noise rejected     : " << (!noise_bounded.valid) << "\n"
+        << "\nPHYSICAL NOTE: synthetic PASS is necessary but NOT sufficient.\n"
+        << "The 2026-08-20 hardware benchmark still produced anatomically wrong\n"
+        << "single-index endpoints, including a wrong finite HIGH-confidence point.\n"
+        << "PR #9 therefore remains DO NOT MERGE pending a new identity design.\n";
 
     const bool pass = bounded.valid &&
         bounded.support_cells > 200 &&
@@ -157,6 +155,6 @@ int main() {
         return 1;
     }
 
-    std::cout << "PHASE 2B.6 SUPPORT-SKELETON FINGERTIP SELF-TEST: PASS\n";
+    std::cout << "PHASE 2B.6 SUPPORT-SKELETON FINGERTIP SELF-TEST: PASS (SYNTHETIC ONLY)\n";
     return 0;
 }
