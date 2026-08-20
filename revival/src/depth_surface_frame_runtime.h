@@ -61,12 +61,12 @@ inline RuntimeState& state() { static thread_local RuntimeState value; return va
 inline void announce_once(RuntimeState& s) {
     if (s.announced) return;
     s.announced = true;
-    std::cout << "\n[TRACK] PHASE 2B.9C.1 RUNTIME ACTIVE | tracker=V8+LIVE-ANATOMY-SIDECAR | T toggles ON/OFF\n";
+    std::cout << "\n[TRACK] PHASE 2B.9C.2 RUNTIME ACTIVE | tracker=V8+FRAME-SYNC-ANATOMY | T toggles ON/OFF\n";
     std::cout << "[TRACK] Start with start-touchplus-phase2b9c.ps1 so the Python anatomy sidecar is online.\n";
     std::cout << "[TRACK] Clear the work area, then press B once to learn 30 clean background frames.\n";
-    std::cout << "[TRACK] Cyan = V8 palm, white = V8 geometry candidate, magenta = landmark-guided distal candidate.\n";
+    std::cout << "[TRACK] Cyan = V8 palm, white = V8 geometry candidate, magenta = frame-synchronized guided distal.\n";
     std::cout << "[TRACK] Fusion happens BEFORE stereo. Sidecar/model Z is disabled; Touch+ stereo/Q alone owns XYZ.\n";
-    std::cout << "[TRACK] No fresh locked anatomy -> UNKNOWN. Geometry/anatomy disagreement -> UNKNOWN.\n";
+    std::cout << "[TRACK] Age>0 anatomy is palm/shape compensated and must remain a CURRENT distal boundary or it becomes UNKNOWN.\n";
 }
 
 inline bool toggle_requested(RuntimeState& s) {
@@ -132,13 +132,13 @@ inline void maybe_report(RuntimeState& s) {
     if(!s.tracker.background_ready()){std::cout<<"[TRACK] heartbeat | background=NOT_READY | clear work area and press B\n";return;}
 
     const auto& r=s.result; const auto& identity=s.tracker.last_identity(); const auto& geometry=s.tracker.last_decision(); const auto& anatomy_obs=s.tracker.last_anatomy_observation(); const auto& anatomy=s.tracker.last_anatomy_decision(); const auto& fusion=s.tracker.last_fusion();
-    if(!r.hand_valid){std::cout<<"[TRACK] heartbeat | background=READY | no palm-supported hand | changed_cells="<<r.foreground_samples<<" | anatomy="<<touchplus::tracking::anatomy_status_name_v9(anatomy_obs.status)<<" | fusion=UNKNOWN | stereo=NOT_RUN\n";return;}
+    if(!r.hand_valid){std::cout<<"[TRACK] heartbeat | background=READY | no palm-supported hand | changed_cells="<<r.foreground_samples<<" | anatomy="<<touchplus::tracking::anatomy_status_name_v9(anatomy_obs.status)<<" | sync="<<touchplus::tracking::anatomy_sync_status_name_v9(anatomy_obs.sync_status)<<" | fusion=UNKNOWN | stereo=NOT_RUN\n";return;}
 
-    std::cout<<std::fixed<<std::setprecision(1)<<"[TRACK] heartbeat | background=READY | silhouette="<<r.hand_samples<<" cells | palm="<<identity.palm_gx<<","<<identity.palm_gy<<" r="<<identity.palm_radius<<" fill="<<identity.palm_core_fill<<" | branches="<<identity.candidates.size()<<" | geometry="<<touchplus::tracking::identity_state_name_v8(geometry.state)<<"/"<<geometry.confidence<<" | anatomy="<<touchplus::tracking::anatomy_status_name_v9(anatomy_obs.status)<<"/"<<touchplus::tracking::anatomy_track_state_name_v9(anatomy.state)<<"/"<<anatomy.confidence<<" src="<<touchplus::tracking::anatomy_source_name_v9(anatomy_obs.source)<<" age="<<anatomy_obs.age_frames<<" | fusion="<<touchplus::tracking::fusion_mode_name_v9(fusion.mode)<<"/"<<s.tracker.identity_confidence()<<" | stereo_confidence="<<s.tracker.stereo_confidence();
+    std::cout<<std::fixed<<std::setprecision(1)<<"[TRACK] heartbeat | background=READY | silhouette="<<r.hand_samples<<" cells | palm="<<identity.palm_gx<<","<<identity.palm_gy<<" r="<<identity.palm_radius<<" fill="<<identity.palm_core_fill<<" | branches="<<identity.candidates.size()<<" | geometry="<<touchplus::tracking::identity_state_name_v8(geometry.state)<<"/"<<geometry.confidence<<" | anatomy="<<touchplus::tracking::anatomy_status_name_v9(anatomy_obs.status)<<"/"<<touchplus::tracking::anatomy_track_state_name_v9(anatomy.state)<<"/"<<anatomy.confidence<<" src="<<touchplus::tracking::anatomy_source_name_v9(anatomy_obs.source)<<" age="<<anatomy_obs.age_frames<<" sync="<<touchplus::tracking::anatomy_sync_status_name_v9(anatomy_obs.sync_status)<<" overlap="<<anatomy_obs.sync_shape_overlap<<" palm_shift="<<anatomy_obs.sync_palm_shift_px<<" | fusion="<<touchplus::tracking::fusion_mode_name_v9(fusion.mode)<<"/"<<s.tracker.identity_confidence()<<" | stereo_confidence="<<s.tracker.stereo_confidence();
 
-    if(!r.fingertip_valid){if(anatomy.has_candidate)std::cout<<" | anatomy_tip="<<anatomy.tip_x<<","<<anatomy.tip_y;if(geometry.has_candidate)std::cout<<" | geometry_tip="<<geometry.tip_gx*kDepthScale+1<<","<<geometry.tip_gy*kDepthScale+1;std::cout<<" | fingertip=UNKNOWN | fusion_reason="<<fusion.reason<<" | geometry_reason="<<geometry_rejection_reason(identity,geometry)<<" | agreement_px="<<fusion.agreement_distance_px<<" | stereo=NOT_RUN/"<<s.tracker.stereo_confidence()<<"\n";return;}
+    if(!r.fingertip_valid){if(anatomy.has_candidate)std::cout<<" | anatomy_tip="<<anatomy.tip_x<<","<<anatomy.tip_y;if(anatomy.source_tip_x>=0)std::cout<<" source_tip="<<anatomy.source_tip_x<<","<<anatomy.source_tip_y;if(geometry.has_candidate)std::cout<<" | geometry_tip="<<geometry.tip_gx*kDepthScale+1<<","<<geometry.tip_gy*kDepthScale+1;std::cout<<" | fingertip=UNKNOWN | fusion_reason="<<fusion.reason<<" | geometry_reason="<<geometry_rejection_reason(identity,geometry)<<" | agreement_px="<<fusion.agreement_distance_px<<" | stereo=NOT_RUN/"<<s.tracker.stereo_confidence()<<"\n";return;}
 
-    std::cout<<" | fingertip surface XYZ=("<<r.smoothed_tip.x_mm<<", "<<r.smoothed_tip.y_mm<<", H="<<r.smoothed_tip.h_mm<<") mm | tip_pixel="<<r.pixel_x<<","<<r.pixel_y<<" | identity_id="<<fusion.identity_id<<" | fusion_mode="<<touchplus::tracking::fusion_mode_name_v9(fusion.mode)<<" | support="<<r.refinement_support<<" | final_confidence="<<r.confidence<<"\n";
+    std::cout<<" | fingertip surface XYZ=("<<r.smoothed_tip.x_mm<<", "<<r.smoothed_tip.y_mm<<", H="<<r.smoothed_tip.h_mm<<") mm | tip_pixel="<<r.pixel_x<<","<<r.pixel_y<<" | identity_id="<<fusion.identity_id<<" | fusion_mode="<<touchplus::tracking::fusion_mode_name_v9(fusion.mode)<<" | sync="<<touchplus::tracking::anatomy_sync_status_name_v9(anatomy.sync_status)<<" age="<<anatomy.age_frames<<" | support="<<r.refinement_support<<" | final_confidence="<<r.confidence<<"\n";
 }
 
 } // namespace tracking_runtime_detail

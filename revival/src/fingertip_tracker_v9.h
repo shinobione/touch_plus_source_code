@@ -13,13 +13,15 @@
 
 namespace touchplus::tracking {
 
-// Phase 2B.9C.1 runtime integration.
+// Phase 2B.9C.2 runtime integration.
 //
 // Geometry V8 remains the temporal palm/branch safety layer. A separate Python
 // sidecar receives only LEFT grayscale + the current Touch+ silhouette and
 // returns a 2D landmark-guided distal candidate. Fusion happens BEFORE stereo.
-// No sidecar/model Z enters this class; accepted Touch+ stereo/Q is still the
-// only metric XYZ source.
+// 2B.9C.2 additionally aligns asynchronous anatomy results back to the current
+// frame using a short palm/silhouette history and requires the compensated point
+// to remain a real current distal boundary. No sidecar/model Z enters this class;
+// accepted Touch+ stereo/Q is still the only metric XYZ source.
 
 class FingertipTrackerV9 {
 public:
@@ -241,9 +243,23 @@ public:
     std::uint32_t sidecar_last_error() const { return static_cast<std::uint32_t>(anatomy_bridge_.last_error()); }
 
 private:
+    void remember_sync_snapshot(const AnatomyFrameSyncSnapshotV9& snapshot) {
+        sync_history_.push_back(snapshot);
+        while (sync_history_.size() > 6) sync_history_.erase(sync_history_.begin());
+    }
+
     void exchange_anatomy(const std::vector<uint8_t>& left_gray, const std::vector<uint8_t>& mask, bool hand_valid, double palm_radius_full_px) {
+        const auto current = make_anatomy_sync_snapshot_v9(frame_id_, mask, last_identity_, touchplus::depth::kDepthScale);
+        remember_sync_snapshot(current);
         anatomy_bridge_.publish_frame(frame_id_, left_gray, mask, hand_valid, base_.background_ready());
-        last_anatomy_observation_ = anatomy_bridge_.read_result(frame_id_, 3);
+        const AnatomyObservationV9 raw = anatomy_bridge_.read_result(frame_id_, 2);
+        last_anatomy_observation_ = synchronize_anatomy_observation_v9(
+            raw,
+            sync_history_,
+            current,
+            touchplus::depth::kDepthWidth,
+            touchplus::depth::kDepthHeight,
+            touchplus::depth::kDepthScale);
         last_anatomy_decision_ = anatomy_gate_.update(last_anatomy_observation_, palm_radius_full_px);
     }
     void reset_metric_if_identity_lost(bool fused_locked, std::uint64_t identity_id) {
@@ -251,7 +267,7 @@ private:
         if (metric_identity_id_ != identity_id) { have_smoothed_ = false; missing_metric_frames_ = 0; smoothed_ = {}; metric_identity_id_ = identity_id; }
     }
     void clear_tracking_only() {
-        selected_mask_.clear(); last_result_ = {}; last_identity_ = {}; last_decision_ = {}; last_anatomy_observation_ = {}; last_anatomy_decision_ = {}; last_fusion_ = {};
+        selected_mask_.clear(); sync_history_.clear(); last_result_ = {}; last_identity_ = {}; last_decision_ = {}; last_anatomy_observation_ = {}; last_anatomy_decision_ = {}; last_fusion_ = {};
         temporal_identity_.clear(); anatomy_gate_.clear(); identity_confidence_ = "LOW"; stereo_confidence_ = "NOT_RUN"; have_smoothed_ = false; missing_metric_frames_ = 0; metric_identity_id_ = 0; smoothed_ = {};
     }
 
@@ -266,6 +282,7 @@ private:
     AnatomyDecisionV9 last_anatomy_decision_{};
     FusedIdentityV9 last_fusion_{};
     std::vector<uint8_t> selected_mask_;
+    std::vector<AnatomyFrameSyncSnapshotV9> sync_history_;
     std::string identity_confidence_ = "LOW", stereo_confidence_ = "NOT_RUN";
     std::uint32_t frame_id_ = 0;
     bool have_smoothed_ = false;
