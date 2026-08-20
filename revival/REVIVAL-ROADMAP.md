@@ -1,6 +1,6 @@
 # TouchPlus Revival — canonical roadmap / handoff
 
-Last updated: **2026-08-20 11:38 CEST**
+Last updated: **2026-08-20 20:47 CEST**
 
 This file is the canonical resume point for TouchPlus Revival. Read it first in a new ChatGPT/Codex session, then inspect `revival/main`, the active PR and the latest GitHub Actions runs before changing code.
 
@@ -10,7 +10,7 @@ Revive the abandoned Ractiv Touch+ as a modern stereo/3D input device without re
 
 Canonical pipeline:
 
-`Etron/USB unlock → persistent stereo capture → local metric calibration → rectification → disparity/depth → working-surface frame → 3D hand/finger identity → useful runtime outputs`
+`Etron/USB unlock → persistent stereo capture → local metric calibration → rectification → disparity/depth → working-surface frame → fingertip identity → touch/contact semantics → useful runtime outputs`
 
 Revival code lives under `revival/`; canonical integration branch is `revival/main`.
 
@@ -53,83 +53,72 @@ Canonical base: `revival/main`
 - **Phase 1C.1 — Physical metric-depth validation** — PR #6 merged at `ae0efe18dcd0616628b83af432909ee01499d507`.
   - solved baseline `59.953 mm` vs physical lens spacing `60–61 mm`;
   - clean 350/600 mm physical depth test preserves distance delta to `+0.82%`;
-  - calibration state physically validated.
+  - calibration physically validated without rescaling `K/D/R/T/P/Q`.
 
 - **Phase 1C.2 — Live rectified metric depth viewer** — PR #7 merged at `2c1575efe8f9fc139a553818cb8282d15450855c`.
   - persistent live rectification + diagnostic heatmap;
-  - hardened full-resolution cursor matcher: texture gate, NCC, uniqueness, LEFT↔RIGHT consistency, local disparity consensus, temporal rejection;
+  - hardened full-resolution matcher with texture gate, NCC, uniqueness, LEFT↔RIGHT consistency, local consensus and temporal rejection;
   - `P` locked probe reports valid %, median Z, MAD and confidence;
-  - physical long-run smoke removed previous catastrophic false depths;
-  - same fixed planar target, seven independent valid probe locations: fitted 3D plane `R²≈0.9984`, RMS residual `≈0.41 mm`, max residual `≈0.57 mm`;
-  - one texture-poor location correctly returned 0 valid samples instead of a false finite Z.
+  - physical long-run smoke removed catastrophic false depths.
 
 - **Phase 2A — Working-surface frame calibration** — PR #8 merged at `92a34b13f7ac75c6f2362a800ad06c78cb8876fe`.
-  - immutable camera calibration is preserved; surface pose is a separate per-setup artifact;
-  - deterministic dominant-plane consensus rejects coherent wrong-surface samples and gross stereo outliers;
-  - runtime controls: `C` capture, `F` fit/save, `R` reset pending, `U` undo last pending point, `H` surface-relative height, `P` locked depth probe;
-  - physical fit on unit `0101007379`: `19 / 17` samples/inliers, RMS `0.924 mm`, max residual `2.021 mm`, coverage `403.9 × 356.9 mm`, confidence `HIGH`;
-  - seven bare-surface H checks: `+1.7, -0.4, +1.4, +2.6, -0.9, -0.4, +0.3 mm`;
-  - one texture-poor H location correctly returned invalid instead of a false height;
-  - rigid book measured `53 mm` thick produced top-face H readings `54.1 mm` and `55.3 mm`.
+  - camera calibration remains immutable; surface pose is a separate per-setup artifact;
+  - dominant-plane consensus rejects coherent wrong-surface samples and gross stereo outliers;
+  - physical fit on unit `0101007379`: `19 / 17` samples/inliers, RMS `0.924 mm`, max residual `2.021 mm`, confidence `HIGH`;
+  - bare-table H remains near zero;
+  - 53 mm rigid object measured `54.1 mm` / `55.3 mm`.
+
+- **Phase 2B — Hand / Fingertip 3D tracking** — PR #9 squash-merged at `e43e6445708b4fd27d431956e404ae4fd0d8ceae` after physical acceptance.
+  - learned background + Touch+ appearance silhouette;
+  - V8 temporal palm/branch safety and persistent identity;
+  - OpenCV Zoo / MediaPipe hand landmarks used only as a separate 2D anatomical sidecar;
+  - raw landmark 8 is diagnostic only because physical evaluation showed confident proximal errors;
+  - landmark chain supplies index anatomy/direction while the Touch+ silhouette owns the actual distal boundary;
+  - ROI-guided landmark reacquisition raised the real offline ten-pose gate from 5/10 to 8/10 guided distal, with 0 observed wrong published guided tips;
+  - live sidecar / shared-memory IPC physically validated;
+  - frame-synchronous anatomy fusion rejects stale anatomy after fast pose changes before stereo;
+  - physical 2B.9C.2 closeout observed no wrong finite MEDIUM/HIGH fingertip in the final stress smoke;
+  - final binding safety rule remains: **wrong finite/HIGH fingertip = BLOCKER; UNKNOWN is acceptable when identity is uncertain**.
+
+Phase 2B physical closeout note:
+
+- `revival/notes/phase2b9c2-physical-smoke-2026-08-20.md`
+
+Historical Phase 2B progression and regressions remain documented under `revival/notes/phase2b*.md`.
 
 ### Active canonical slice
 
-**Phase 2B — hand / fingertip 3D tracking**
+**Phase 2C — touch/contact detection**
 
-Active branch: `revival/phase2b-fingertip-3d`
+Phase 2C is now unblocked by the Phase 2B physical pass.
 
-Active PR: **#9** — Draft / **DO NOT MERGE**.
-
-Latest documented branch head at this handoff: `e3524361975bbbd6299410e2ae6107be842d2aee`. Always re-read PR #9 before relying on that SHA because the branch is actively iterated.
-
-Current experimental revision: **Phase 2B.7 — SCOPA-inspired palm-core finger branch**.
-
-Physical status after the 2026-08-20 bench: **PARTIAL PASS / FINGERTIP IDENTITY FAIL**.
-
-What is accepted inside Phase 2B so far:
-
-- runtime wiring / `T` toggle / surface artifact load;
-- learned background with `B`;
-- no-hand baseline after learning can remain clean (`changed_cells=0` observed);
-- appearance silhouette preserves low-texture distal skin better than dense-depth-only masks;
-- physical support bounding removes the early giant-component / long-tail failure class;
-- ambiguity handling can reject some multi-branch cases;
-- robust stereo refinement can produce metric XYZ when given a valid pixel.
-
-What is **not** accepted:
-
-- anatomical fingertip identity.
-
-In the latest 2B.7 physical bench, a single clearly extended index still produced materially different `tip_pixel` candidates between adjacent frames while the downstream stereo matcher could report MEDIUM/HIGH confidence. Representative sequences include:
-
-```text
-231,193 -> 257,207 -> 373,245 -> 243,167
-263,173 -> 265,177 -> 189,87
-```
-
-Therefore **metric refinement confidence must not be interpreted as identity confidence**. A wrong branch can still lead to a strong stereo match.
-
-Detailed active notes:
-
-- `revival/notes/phase2b-fingertip-3d.md`
-- `revival/notes/phase2b7-physical-smoke-2026-08-20.md` on the active branch.
+Do **not** start by injecting mouse clicks. First define and validate contact semantics in surface coordinates.
 
 ### Next canonical action
 
-Do not merge #9 and do not loosen the stereo matcher.
+Create a dedicated Phase 2C branch/PR and implement a conservative touch-state machine on top of the accepted fingertip stream.
 
-Continue Phase 2B by strengthening only the 2D identity stage while preserving accepted lower layers:
+Minimum design boundary:
 
-1. validate the palm core before branch scoring;
-2. add short temporal palm persistence;
-3. persist finger-branch identity across adjacent frames instead of re-electing independently;
-4. require finger-like branch width/length geometry leaving the palm boundary;
-5. reject unexplained 2D fingertip jumps;
-6. separate **identity confidence** from **stereo refinement confidence**;
-7. return `unknown` whenever identity is unstable, even with excellent stereo support;
-8. compare the geometry path against a lightweight modern 2D hand-landmark fallback before accumulating more endpoint heuristics.
+1. input only accepted current fingertip identity + `Xsurface / Ysurface / H`;
+2. identity `UNKNOWN`, stale anatomy or stereo invalidity can never create/continue a touch;
+3. use explicit states such as `NO_FINGER → HOVER → APPROACHING → CONTACT_CANDIDATE → TOUCH_DOWN → TOUCH_HELD → RELEASE`;
+4. contact must require more than one low-H sample: use temporal persistence + downward/approach context + hysteresis;
+5. release threshold must be higher than touch-down threshold to avoid chatter;
+6. reject impossible H jumps and identity/branch changes;
+7. keep detection and OS injection separate: Phase 2C first proves reliable semantic `TOUCH_DOWN / HOLD / UP` events, then a later slice may map them to Windows touch/mouse;
+8. preserve all accepted camera calibration, surface frame, capture, sidecar and stereo boundaries unchanged.
 
-Do not use temporal smoothing to hide a wrong anatomical choice. Temporal logic starts only after a plausible identity exists.
+Physical acceptance target for Phase 2C should include:
+
+- hover above the table never clicks;
+- slow approach creates exactly one touch-down only near the physical surface;
+- holding the finger down produces no click spam;
+- lifting produces exactly one release;
+- repeated taps produce one down/up pair each;
+- lateral motion while touching stays one held contact;
+- identity loss / ambiguity immediately fails safe rather than inventing contact;
+- no-hand learned scene never emits touch events.
 
 ---
 
@@ -215,7 +204,7 @@ Raw personal calibration/test images and videos are evidence only and must not b
 
 ---
 
-## 4. Accepted Phase 2A surface-frame behavior
+## 4. Accepted surface-frame behavior
 
 The surface frame is a **separate per-setup artifact** saved beside the runtime as:
 
@@ -223,65 +212,85 @@ The surface frame is a **separate per-setup artifact** saved beside the runtime 
 
 It must never mutate the per-serial camera calibration.
 
-Controls layered into the accepted depth/surface viewer:
-
-- `C` — capture one fixed surface point for 45 frames with the hardened matcher;
-- `F` — deterministic dominant-plane fit + robust refinement; save MEDIUM/HIGH fits only;
-- `R` — reset pending surface samples only;
-- `U` — undo the latest accepted pending surface point;
-- `H` — print camera XYZ + `Xsurface / Ysurface / H`;
-- `P` — existing Phase 1C locked probe diagnostic;
-- `D` / `S` / `Q` — existing depth / rectified stereo / quit.
+Moving the Touch+ base or pitch hinge requires **surface-frame recalibration**, not camera recalibration.
 
 Recommended recalibration after moving the device: **8–12 well-spread textured points** over the intended work area, including left/right and near/far image regions. A flat printed checkerboard can be used as temporary table texture.
 
-The dominant-plane fitter uses a physically capped consensus threshold so 50–100 mm wrong-depth samples cannot self-justify as inliers by inflating a global MAD threshold.
-
 ---
 
-## 5. Phase 2B — hand/fingertip tracking
+## 5. Accepted Phase 2B fingertip architecture
 
-Current accepted conceptual separation:
+Accepted conceptual separation:
 
 ```text
-background / appearance silhouette
+learned background / appearance silhouette
             ↓
-physical support bounding
+V8 palm + branch temporal safety
             ↓
-2D hand / palm / fingertip IDENTITY
+2D landmark anatomy sidecar
             ↓
-robust stereo refinement
+ROI reacquisition when needed
+            ↓
+landmark-guided distal projection onto Touch+ silhouette
+            ↓
+frame-synchronous current-distal validation
+            ↓
+conservative identity fusion
+            ↓
+robust Touch+ stereo refinement
             ↓
 Xsurface / Ysurface / H
 ```
 
-The order matters. A correct stereo match for the wrong pixel is still a wrong fingertip.
+Critical ownership rules:
 
-Phase 2B runtime controls:
+```text
+metric_z_source          = TOUCHPLUS_STEREO_ONLY
+raw MediaPipe landmark 8 = DIAGNOSTIC ONLY
+model Z                  = DISCARDED
+OpenCV/ONNX in Etron EXE = NO
+K/D/R/T/P/Q              = IMMUTABLE ACCEPTED STACK
+surface frame            = SEPARATE PER-SETUP ARTIFACT
+```
 
-- `B` — learn/relearn clean background;
-- `T` — tracker ON/OFF;
-- existing Phase 1C/2A controls remain available.
+The asynchronous anatomy sidecar may contribute a candidate only if its source/current-frame relationship remains meaningful. Current-distal validation and identity fusion fail closed on excessive pose/shape changes.
 
-Phase 2B acceptance principle: missing, ambiguous or anatomically unstable data must be rejected or marked `unknown` rather than silently turned into a finite fingertip or touch.
-
-Current merge gate for PR #9:
-
-- no persistent hand in a clear learned scene;
-- palm diagnostic anatomically plausible;
-- one clearly extended index remains the same distal fingertip through vertical, horizontal and diagonal motion;
-- two comparable fingers may become ambiguous/unknown;
-- finite XYZ stays attached to that same fingertip;
-- lowering the index lowers H;
-- low texture or identity instability becomes unknown, never wrong finite HIGH.
-
-Touch/click semantics remain Phase 2C and must not be implemented before Phase 2B identity is physically trustworthy.
+A correct stereo match for the wrong pixel is still a wrong fingertip. Stereo confidence must never override identity confidence.
 
 ---
 
-## 6. Phase 3 — useful outputs
+## 6. Phase 2C — touch/contact semantics
 
-Potential outputs:
+Phase 2C consumes the accepted Phase 2B output; it does not redefine fingertip identity or metric depth.
+
+Recommended first implementation:
+
+```text
+VALID FINGERTIP
+(Xsurface, Ysurface, H)
+        ↓
+contact temporal state machine
+        ↓
+semantic events only
+HOVER / TOUCH_DOWN / TOUCH_HELD / TOUCH_UP
+```
+
+Safety requirements:
+
+- invalid/unknown identity → no contact;
+- invalid stereo → no contact;
+- stale anatomy → no contact;
+- touch-down requires sustained near-surface evidence, not one frame;
+- hysteresis separates down/up thresholds;
+- unexpected H or XY jumps reset/fail safe;
+- branch/identity change resets contact candidate;
+- OS mouse/touch injection is a separate later boundary after semantic events physically pass.
+
+---
+
+## 7. Phase 3 — useful outputs
+
+Potential outputs after reliable touch semantics:
 
 - Windows pointer/touch;
 - gestures / pinch;
@@ -292,7 +301,7 @@ Potential outputs:
 
 ---
 
-## 7. Constraints / cautions
+## 8. Constraints / cautions
 
 - historical Etron stack is Win32/32-bit;
 - Etron COM initialization needs compatibility handling;
@@ -304,11 +313,11 @@ Potential outputs:
 - raw personal calibration/test photos/videos must not be committed publicly;
 - moving the Touch+ base or pitch hinge requires **surface-frame** recalibration, not stereo recalibration;
 - historical Ractiv/Etron redistribution rights must be reviewed before any public bundled installer;
-- do not treat green synthetic CI as physical acceptance for tracking identity;
+- do not treat green synthetic CI as physical acceptance;
 - do not rely on old `sandbox:/...` artifact links across chat windows; retrieve current artifacts from GitHub Actions.
 
 ---
 
-## 8. One-line handoff
+## 9. One-line handoff
 
-> `@GitHub Reprends TouchPlus Revival depuis revival/REVIVAL-ROADMAP.md. Vérifie revival/main puis la PR #9 / branche revival/phase2b-fingertip-3d et ses derniers checks avant toute modification. Phases 0→2A sont physiquement acceptées. Phase 2B.7 palm-core est un PARTIAL PASS mais le bench physique du 2026-08-20 échoue encore sur l'identité fingertip: no-hand/background et silhouette sont bons, mais un index unique peut recevoir des tip_pixel différents avec MEDIUM/HIGH stereo confidence. Ne merge pas #9, ne touche pas K/D/R/T/P/Q ni au surface frame validé. Prochaine action: renforcer l'identité 2D (palm validation + temporal palm/branch persistence + finger-like branch geometry + identity confidence séparée du stereo confidence), puis refaire un smoke physique.`
+> `@GitHub Reprends TouchPlus Revival depuis revival/REVIVAL-ROADMAP.md. Vérifie revival/main et l'active PR avant toute modification. Phases 0→2B sont physiquement acceptées. PR #9 a été squash-mergée à e43e6445708b4fd27d431956e404ae4fd0d8ceae après le PASS physique 2B.9C.2. Ne touche pas K/D/R/T/P/Q, au surface frame accepté, au capture pipeline ni au matcher stéréo. Prochaine phase: 2C touch/contact semantics, d'abord en événements HOVER/DOWN/HOLD/UP fail-closed, sans injection Windows tant que le smoke physique n'est pas passé.`
