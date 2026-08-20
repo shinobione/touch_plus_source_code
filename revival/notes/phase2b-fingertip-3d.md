@@ -19,9 +19,9 @@ Phase 2A already proved a useful working-surface frame on real hardware: bare ta
 
 ## Why 2B.7 changes the identity model
 
-The recovered Ractiv SCOPA implementation did **not** equate the longest wrist-rooted skeleton branch with the index. It first estimated a palm center/radius from an interior distance transform, then separated palm/arm from distal finger structure before resolving labeled finger points.
+The recovered Ractiv SCOPA implementation did **not** equate the longest wrist-rooted skeleton branch with the index. It estimated `palm_point` / `palm_radius` using an interior distance transform, used that palm geometry to separate arm/palm from distal structure, then continued into contour/pose labeling before producing explicit finger points. The recovered `HandResolver` then refined those coarse labeled points locally against the learned background at higher resolution.
 
-2B.7 adopts that useful anatomical principle without importing the legacy OpenCV pose/DTW stack.
+2B.7 keeps the useful anatomical principle — **find the palm first, then reason about finger branches outside it** — without importing the legacy OpenCV pose/DTW stack.
 
 ## Phase 2B.7 architecture
 
@@ -60,7 +60,7 @@ Viewer diagnostics:
 - **white cross** — selected fingertip identity when metric refinement is not yet valid;
 - console reports `palm=x,y r=... | branches=N` on each heartbeat.
 
-These diagnostics deliberately separate three failure classes on physical smoke: wrong palm, wrong finger branch, or correct 2D identity but insufficient stereo refinement.
+These diagnostics deliberately separate three physical failure classes: wrong palm, wrong finger branch, or correct 2D identity but insufficient stereo refinement.
 
 ## Synthetic regressions
 
@@ -68,7 +68,7 @@ These diagnostics deliberately separate three failure classes on physical smoke:
 
 - diagonal dominant index with distal appearance but missing dense support;
 - long connected appearance-only tail;
-- top-entry forearm longer than some finger branches must be explicitly excluded;
+- top-entry forearm must be explicitly excluded;
 - **horizontal dominant index** (direct regression for the latest physical benchmark);
 - two similarly long fingers must become ambiguous;
 - tiny no-hand noise must remain rejected.
