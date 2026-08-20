@@ -1,6 +1,6 @@
 # Phase 2C — touch/contact detection
 
-Status: **OPEN / DESIGN FIRST / NO OS INJECTION**
+Status: **2C.1 IMPLEMENTED / CI CANDIDATE / PHYSICAL SMOKE REQUIRED / NO OS INJECTION**
 
 Phase 2B is physically accepted and merged. Phase 2C consumes only the accepted current fingertip result; it does not redefine camera calibration, surface calibration, anatomical identity, or stereo depth.
 
@@ -30,116 +30,129 @@ frame/time
 
 Any invalid/unknown/stale upstream state is a hard contact reset/fail-safe.
 
-## Phase 2C.1 target
+## Phase 2C.1 implementation
 
-Implement **semantic contact events only**. Do not inject Windows mouse/touch yet.
-
-Proposed states:
+2C.1 is deliberately a new semantic layer above the accepted 2B.9C.2 runtime:
 
 ```text
-NO_FINGER
-   |
-   v
-HOVER
-   |
-   v
-APPROACHING
-   |
-   v
-CONTACT_CANDIDATE
-   |
-   v
-TOUCH_DOWN
-   |
-   v
-TOUCH_HELD
-   |
-   v
-TOUCH_UP
-   |
-   +----> HOVER / NO_FINGER
+accepted current fingertip
+        ↓
+TouchContactDetectorV1
+        ↓
+NO_FINGER / HOVER / APPROACHING / CONTACT_CANDIDATE
+        ↓
+TOUCH_DOWN / TOUCH_HELD / TOUCH_UP
+        ↓
+console telemetry only
 ```
 
-The exact implementation may collapse transient event states internally, but diagnostics must make down/held/up unambiguous.
+There is **no Windows mouse/touch injection** in this slice.
 
-## Conservative initial semantics
+The runtime wrapper is `revival/src/touch_contact_runtime.h`. It force-includes the accepted `depth_surface_frame_runtime.h` first and consumes only its final valid `TrackingResult` plus `fusion.identity_id`. This keeps calibration, surface geometry, anatomical fusion and stereo matching physically owned by the already accepted layers.
 
-Touch-down must not be a one-frame `H < threshold` rule.
+## Candidate thresholds for the first hardware smoke
 
-A candidate should require all of:
+These values are intentionally conservative **candidates**, not accepted constants:
+
+```text
+approach band             <= 45 mm
+DOWN near-surface band    <= 12 mm
+candidate slack           +3 mm
+RELEASE hysteresis        >= 22 mm
+near samples required     3
+release samples required  2
+candidate XY step max     16 mm
+pre-contact XY jump max   45 mm
+held XY jump max          90 mm
+H jump max                28 mm
+recent approach memory    12 semantic samples
+```
+
+The physically validated bare-table residual is millimetric, so DOWN begins comfortably above zero. The real Touch+ smoke decides whether these thresholds need tuning; CI does not promote them to physical truth.
+
+## Conservative semantics
+
+Touch-down is never a one-frame `H < threshold` rule.
+
+A DOWN candidate requires all of:
 
 - valid current fingertip identity;
-- stable identity ID across the candidate window;
-- valid Touch+ stereo result;
-- `H` entering a near-surface band;
-- recent approach/downward trend or already-established near-surface candidate;
+- non-zero stable `identity_id` across the candidate window;
+- valid Touch+ stereo metric result;
+- recent downward/approach evidence;
+- entry into the near-surface band;
 - multiple consecutive compatible samples;
-- bounded XY motion during the final contact confirmation window;
-- no impossible H jump.
+- bounded XY motion during final confirmation;
+- no impossible H/XY jump.
 
-Release should use hysteresis: the release H threshold must be higher than the touch-down H threshold, and/or require consecutive release evidence.
-
-Initial thresholds must be treated as **candidate values to be physically tuned**, not accepted constants. The physically validated surface noise floor is roughly millimetric, so thresholds should begin comfortably above the observed bare-table residuals rather than at zero.
+Release uses hysteresis and consecutive release evidence. Once held, ordinary lateral motion is allowed so a drag remains one held contact rather than click spam.
 
 ## Safety rules
 
 These are binding:
 
 ```text
-identity UNKNOWN       -> no touch / cancel candidate
-identity_id change     -> release/reset
-stereo invalid         -> no new touch; conservative reset policy
-stale anatomy          -> no touch
-large XY jump          -> reset candidate
-large H jump           -> reset candidate
+identity UNKNOWN       -> no DOWN / cancel candidate
+identity_id change     -> fail-safe UP if held, then reset
+stereo invalid         -> no DOWN; fail-safe UP if held
+stale anatomy          -> no DOWN / reset through upstream invalidity
+large XY jump          -> reset; fail-safe UP if held
+large H jump           -> reset; fail-safe UP if held
 no hand                -> NO_FINGER
 ```
 
-A touch detector is not allowed to "hold through" upstream uncertainty merely to make the UI feel smooth.
+The detector is not allowed to hold through upstream uncertainty merely to make the UI feel smooth.
 
-## Telemetry required before physical smoke
+## Runtime telemetry
 
-At minimum:
+State transitions and DOWN/UP edges are logged immediately. A heartbeat also reports:
 
 ```text
 contact_state=...
+event=NONE|DOWN|HELD|UP
 identity_id=...
 H=... mm
-h_velocity=... mm/s or trend=...
+h_velocity=... mm/s
 near_count=...
 release_count=...
 xy_delta=... mm
 reason=...
-event=NONE|DOWN|HELD|UP
 ```
 
-The logs must distinguish a semantic event from the continuously held state.
+Important distinction:
 
-## Synthetic regressions required
+- `event=DOWN` is emitted once on contact confirmation;
+- subsequent contact frames report `event=HELD`;
+- `event=UP` is emitted once on release or fail-safe release.
 
-Before hardware smoke, cover at least:
+## Synthetic regressions implemented
 
-1. hover at 20–80 mm for a long time -> no DOWN;
-2. one-frame low-H spike -> no DOWN;
-3. smooth approach to surface -> one DOWN;
-4. hold near surface for many frames -> no repeated DOWN;
-5. lift above release threshold -> one UP;
-6. repeated taps -> exactly one DOWN/UP pair per tap;
+`touchplus_touch_contact_selftest` covers:
+
+1. long hover -> zero DOWN;
+2. one-frame low-H spike -> zero DOWN;
+3. smooth approach -> exactly one DOWN;
+4. long hold -> no repeated DOWN;
+5. lift -> exactly one UP;
+6. five repeated taps -> exactly five DOWN/UP pairs;
 7. lateral drag while low-H -> HELD, no click spam;
 8. identity loss during approach -> reset, no DOWN;
-9. identity loss while held -> fail-safe UP/reset;
-10. identity ID switch -> fail-safe UP/reset;
-11. stereo invalidity / missing metric -> no invented contact;
-12. violent H/XY jump -> reset.
+9. identity/stereo loss while held -> fail-safe UP;
+10. identity ID switch while held -> fail-safe UP;
+11. invalid stereo/no finger -> no invented contact;
+12. violent pre-contact XY jump -> reset;
+13. stationary already-near finger without observed approach -> no DOWN.
+
+Synthetic PASS is only permission to perform the hardware smoke. It is not physical acceptance.
 
 ## First physical smoke target
 
 Do not map to Windows yet.
 
-Use console/viewer telemetry and ask the operator to perform:
+Start the accepted anatomy sidecar + tracker runtime, learn the clean background with `B`, then perform:
 
-- hover without touching;
-- slow approach and physical table touch;
+- hover at several heights without touching;
+- slow approach and real physical table touch;
 - hold for several seconds;
 - lift;
 - 5 deliberate taps;
@@ -153,6 +166,7 @@ Acceptance target:
 - hold produces no repeated DOWN;
 - drag remains one held contact;
 - ambiguity/identity loss fails safe;
-- no no-hand touch events.
+- no no-hand touch events;
+- no DOWN is created from an uncertain/invalid fingertip.
 
-Only after this semantic layer physically passes should a later Phase 2C slice consider Windows pointer/touch injection.
+Only after this semantic layer physically passes should Phase 2C.2 consider Windows pointer/touch injection.

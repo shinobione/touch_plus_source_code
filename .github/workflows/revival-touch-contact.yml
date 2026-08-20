@@ -1,0 +1,120 @@
+name: Revival Touch Contact
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "revival/**"
+    paths:
+      - "revival/**"
+      - ".github/workflows/revival-touch-contact.yml"
+  pull_request:
+    paths:
+      - "revival/**"
+      - ".github/workflows/revival-touch-contact.yml"
+
+jobs:
+  contact-x64:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure semantic contact tests x64
+        run: cmake -S revival/phase2c_test -B build/contact-x64 -A x64
+
+      - name: Build semantic contact tests x64
+        run: cmake --build build/contact-x64 --config Release
+
+      - name: Run Phase 2C.1 semantic contact self-test x64
+        shell: pwsh
+        run: |
+          & "build/contact-x64/Release/touchplus_touch_contact_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1 touch/contact x64 self-test failed: $LASTEXITCODE" }
+
+  contact-win32-runtime:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure semantic contact tests Win32
+        run: cmake -S revival/phase2c_test -B build/contact-x86 -A Win32
+
+      - name: Build semantic contact tests Win32
+        run: cmake --build build/contact-x86 --config Release
+
+      - name: Run Phase 2C.1 semantic contact self-test Win32
+        shell: pwsh
+        run: |
+          & "build/contact-x86/Release/touchplus_touch_contact_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1 touch/contact Win32 self-test failed: $LASTEXITCODE" }
+
+      - name: Configure accepted Revival Win32 regressions
+        run: cmake -S revival -B build/revival-x86 -A Win32
+
+      - name: Build accepted Revival Win32 regressions
+        run: cmake --build build/revival-x86 --config Release
+
+      - name: Run Phase 2A surface regression
+        shell: pwsh
+        run: |
+          & "build/revival-x86/Release/touchplus_surface_frame_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2A surface self-test regressed: $LASTEXITCODE" }
+
+      - name: Run Phase 1C calibration/Q regression
+        shell: pwsh
+        run: |
+          $exe = "build/revival-x86/Release/touchplus_depth_viewer.exe"
+          $cal = "revival/calibration/candidates/0101007379.json"
+          if (-not (Test-Path $exe)) { throw "touchplus_depth_viewer.exe was not produced" }
+          & $exe --self-test $cal
+          if ($LASTEXITCODE -ne 0) { throw "Phase 1C depth self-test regressed: $LASTEXITCODE" }
+
+      - name: Verify Phase 2C.1 semantic runtime is compiled in
+        shell: pwsh
+        run: |
+          $exe = "build/contact-x86/Release/touchplus_phase2c_tracker.exe"
+          if (-not (Test-Path $exe)) { throw "touchplus_phase2c_tracker.exe was not produced" }
+          $bytes = [System.IO.File]::ReadAllBytes($exe)
+          $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+          if (-not $text.Contains("PHASE 2C.1 SEMANTIC CONTACT ACTIVE")) {
+            throw "Phase 2C.1 runtime banner missing from Win32 executable"
+          }
+          if (-not $text.Contains("OS_INJECTION=DISABLED")) {
+            throw "Phase 2C.1 OS-injection safety banner missing"
+          }
+
+      - name: Prepare Phase 2C.1 semantic contact kit
+        shell: pwsh
+        run: |
+          $src = "build/contact-x86/Release"
+          $kit = "build/touchplus-phase2c1-touch-semantics"
+          New-Item -ItemType Directory -Force -Path $kit | Out-Null
+          New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
+
+          Copy-Item "$src/touchplus_phase2c_tracker.exe" "$kit/touchplus_phase2c_tracker.exe"
+          Copy-Item "$src/touchplus_phase2c_tracker.exe" "$kit/touchplus_phase2b_tracker.exe"
+          Copy-Item "$src/eSPAEAWBCtrl.dll" "$kit/eSPAEAWBCtrl.dll"
+          Copy-Item "$src/eSPDI.dll" "$kit/eSPDI.dll"
+          Copy-Item "$src/EtLib.dll" "$kit/EtLib.dll"
+          Copy-Item "revival/calibration/candidates/0101007379.json" "$kit/calibration/0101007379.json"
+
+          Copy-Item "revival/tools/touchplus_landmark_probe.py" "$kit/touchplus_landmark_probe.py"
+          Copy-Item "revival/tools/touchplus_landmark_probe_b91.py" "$kit/touchplus_landmark_probe_b91.py"
+          Copy-Item "revival/tools/touchplus_landmark_sidecar_live.py" "$kit/touchplus_landmark_sidecar_live.py"
+          Copy-Item "revival/tools/setup-touchplus-landmark-probe.ps1" "$kit/setup-touchplus-landmark-probe.ps1"
+          Copy-Item "revival/tools/start-touchplus-phase2b9c.ps1" "$kit/start-touchplus-phase2b9c.ps1"
+
+          Copy-Item "revival/notes/phase2c-touch-contact-detection.md" "$kit/README-2C1-touch-semantics.md"
+          Copy-Item "revival/notes/phase2b9c2-physical-smoke-2026-08-20.md" "$kit/README-2B9C2-accepted-fingertip.md"
+
+          Get-ChildItem -Recurse $kit | Select-Object FullName,Length | Format-Table -AutoSize
+
+      - name: Upload Phase 2C.1 semantic contact kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchplus-phase2c1-touch-semantics-windows
+          path: build/touchplus-phase2c1-touch-semantics/**
+          if-no-files-found: error
+          retention-days: 30
