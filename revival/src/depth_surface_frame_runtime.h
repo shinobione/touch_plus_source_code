@@ -5,7 +5,7 @@
 #include "depth_probe_lock.h"
 #include "surface_frame_robust.h"
 #include "depth_surface_frame.h"
-#include "fingertip_tracker_v5.h"
+#include "fingertip_tracker_v6.h"
 
 #ifdef point_depth
 #undef point_depth
@@ -54,7 +54,7 @@ struct RuntimeState {
     bool previous_b_down = false;
     bool announced = false;
     std::uint64_t report_counter = 0;
-    touchplus::tracking::FingertipTrackerV5 tracker;
+    touchplus::tracking::FingertipTrackerV6 tracker;
     touchplus::tracking::TrackingResult result;
 };
 
@@ -67,10 +67,11 @@ inline RuntimeState& state() {
 inline void announce_once(RuntimeState& s) {
     if (s.announced) return;
     s.announced = true;
-    std::cout << "\n[TRACK] PHASE 2B.5 RUNTIME ACTIVE"
-              << " | tracker=APPEARANCE-SILHOUETTE | T toggles ON/OFF\n";
+    std::cout << "\n[TRACK] PHASE 2B.6 RUNTIME ACTIVE"
+              << " | tracker=SUPPORT-SKELETON | T toggles ON/OFF\n";
     std::cout << "[TRACK] Clear the work area, then press B once to learn 30 clean background frames.\n";
-    std::cout << "[TRACK] 2D background silhouette identifies the fingertip; robust stereo is used only to measure it.\n";
+    std::cout << "[TRACK] V6 trims photometric tails around physical 3D support, then selects skeleton endpoints only.\n";
+    std::cout << "[TRACK] Near-tied distal branches are rejected as ambiguous instead of choosing an arbitrary finger.\n";
 }
 
 inline bool toggle_requested(RuntimeState& s) {
@@ -157,15 +158,19 @@ inline void maybe_report(RuntimeState& s) {
 
     const auto& r = s.result;
     if (!r.hand_valid) {
-        std::cout << "[TRACK] heartbeat | background=READY | no supported changed hand silhouette"
+        std::cout << "[TRACK] heartbeat | background=READY | no support-bounded hand skeleton"
                   << " | changed_cells=" << r.foreground_samples << "\n";
         return;
     }
     if (!r.fingertip_valid) {
         std::cout << "[TRACK] heartbeat | background=READY | silhouette=" << r.hand_samples
-                  << " cells | tip_pixel=" << r.pixel_x << "," << r.pixel_y
-                  << " | fingertip=unknown"
-                  << " | refinement=" << r.refinement_support
+                  << " cells | tip_pixel=" << r.pixel_x << "," << r.pixel_y;
+        if (r.pixel_x < 0 || r.pixel_y < 0) {
+            std::cout << " | fingertip=ambiguous/no-dominant-skeleton-endpoint";
+        } else {
+            std::cout << " | fingertip=unknown";
+        }
+        std::cout << " | refinement=" << r.refinement_support
                   << " | confidence=" << r.confidence << "\n";
         return;
     }
