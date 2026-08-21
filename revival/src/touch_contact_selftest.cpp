@@ -9,7 +9,7 @@ using namespace touchplus::contact;
 
 struct Counts { int down = 0; int up = 0; int held = 0; };
 
-static ContactSampleV1 sample(std::uint64_t id, double x, double y, double h) {
+static ContactSampleV1 sample(std::uint64_t id, double x, double y, double h, int px = -1, int py = -1) {
     ContactSampleV1 out;
     out.valid = true;
     out.input_status = ContactInputStatusV1::Valid;
@@ -17,6 +17,8 @@ static ContactSampleV1 sample(std::uint64_t id, double x, double y, double h) {
     out.x_mm = x;
     out.y_mm = y;
     out.h_mm = h;
+    out.tip_x = px;
+    out.tip_y = py;
     return out;
 }
 
@@ -24,6 +26,15 @@ static ContactSampleV1 gap(ContactInputStatusV1 status) {
     ContactSampleV1 out;
     out.valid = false;
     out.input_status = status;
+    return out;
+}
+
+static ContactSampleV1 occlusion_gap(ContactInputStatusV1 status, int px, int py, bool identity_compatible = true) {
+    ContactSampleV1 out = gap(status);
+    out.contact_occlusion_proxy = true;
+    out.occlusion_identity_compatible = identity_compatible;
+    out.tip_x = px;
+    out.tip_y = py;
     return out;
 }
 
@@ -145,7 +156,7 @@ int main() {
         TouchContactDetectorV1 detector; Counts counts;
         approach_and_down(detector, counts);
         accumulate(detector.update(gap(ContactInputStatusV1::StereoLow)), counts);
-        require(counts.down == 1 && counts.up == 1, "any upstream invalidity while held must fail-safe UP immediately");
+        require(counts.down == 1 && counts.up == 1, "upstream invalidity without a 2D occlusion proxy while held must fail-safe UP immediately");
     }
     {
         TouchContactDetectorV1 detector; Counts counts;
@@ -233,10 +244,6 @@ int main() {
                 "NO_HAND/surface/tracking hard interruption must start a new contact identity epoch");
     }
     {
-        // Physical regression class from the 2C.1A smoke: near-surface VALID
-        // samples alternated between raw geometry id 21 and raw anatomy id 7 at
-        // essentially the same H. The semantic detector must see one stable
-        // contact identity and be able to accumulate the three validated samples.
         ContactIdentityContinuityV1 ids;
         TouchContactDetectorV1 detector;
         Counts counts;
@@ -258,6 +265,94 @@ int main() {
         require(counts.down == 1, "cross-fusion raw-id churn must no longer prevent a real sparse-evidence DOWN");
     }
 
-    std::cout << "Phase 2C.1B cross-fusion contact identity + sparse touch semantics self-test: PASS\n";
+    // Phase 2C.1C physical regression: the real Touch+ delivered a coherent
+    // descending trajectory around 30 -> 21.5 -> 6.3 mm, then metric/anatomy
+    // publication disappeared while the physical fingertip remained planted on
+    // the table. Metric data returned on lift around 19.3 mm and then > 50 mm.
+    // The bridge may infer contact only from the validated approach + current 2D
+    // continuity. The invalid frames themselves never add near_count or H/XY.
+    {
+        TouchContactDetectorV1 detector; Counts counts;
+        accumulate(detector.update(sample(3, 0.0, 0.0, 30.8, 315, 318)), counts);
+        accumulate(detector.update(sample(3, 0.4, 0.0, 21.5, 316, 320)), counts);
+
+        // Reproduce the sparse reset that previously destroyed the approach state.
+        accumulate(detector.update(gap(ContactInputStatusV1::StereoLow)), counts);
+        accumulate(detector.update(gap(ContactInputStatusV1::IdentityUnknown)), counts);
+
+        const auto near = detector.update(sample(3, 0.8, 0.1, 6.3, 317, 321));
+        accumulate(near, counts);
+        require(near.contact_bridge == ContactOcclusionStateV1::Armed,
+                "21.5 -> 6.3 mm same-identity terminal approach must arm contact occlusion bridge");
+        require(near.near_count == 0,
+                "bridge arming after sparse reset must not invent metric near_count evidence");
+
+        const auto c1 = detector.update(occlusion_gap(ContactInputStatusV1::AnatomyRejected, 318, 322));
+        accumulate(c1, counts);
+        require(c1.event == ContactEventV1::None && c1.contact_bridge == ContactOcclusionStateV1::Confirming &&
+                    c1.near_count == 0,
+                "first 2D-coherent contact occlusion frame must confirm but not create DOWN or near_count");
+
+        const auto c2 = detector.update(occlusion_gap(ContactInputStatusV1::StereoLow, 319, 322));
+        accumulate(c2, counts);
+        require(c2.event == ContactEventV1::Down && c2.contact_from_occlusion_bridge && c2.near_count == 0,
+                "second coherent occlusion frame after armed metric trajectory must create exactly one bridge DOWN");
+
+        for (int i = 0; i < 12; ++i)
+            accumulate(detector.update(occlusion_gap(ContactInputStatusV1::IdentityUnknown, 319 + (i % 2), 322)), counts);
+        require(counts.down == 1 && counts.up == 0 && counts.held > 0,
+                "current 2D proxy must sustain occlusion-held contact without repeating DOWN");
+
+        accumulate(detector.update(sample(3, 1.0, 0.1, 19.3, 320, 319)), counts);
+        require(counts.up == 0, "metric reacquisition below RELEASE must not prematurely end occlusion-held contact");
+        accumulate(detector.update(sample(3, 1.1, 0.1, 52.0, 320, 315)), counts);
+        accumulate(detector.update(sample(3, 1.2, 0.1, 69.0, 320, 312)), counts);
+        require(counts.down == 1 && counts.up == 1,
+                "physical 21.5 -> 6.3 -> dropout -> 19.3 -> lift regression must produce one DOWN and one UP");
+    }
+    {
+        TouchContactDetectorV1 detector; Counts counts;
+        accumulate(detector.update(sample(4, 0, 0, 28.0, 300, 200)), counts);
+        accumulate(detector.update(sample(4, 0, 0, 8.0, 301, 201)), counts);
+        // A large 2D proxy jump looks like the historical stale/palm failure class.
+        accumulate(detector.update(occlusion_gap(ContactInputStatusV1::IdentityUnknown, 355, 245)), counts);
+        accumulate(detector.update(occlusion_gap(ContactInputStatusV1::IdentityUnknown, 356, 245)), counts);
+        require(counts.down == 0, "large non-metric tip jump must never create contact-occlusion DOWN");
+    }
+    {
+        TouchContactDetectorV1 detector; Counts counts;
+        // Near-surface hover without a terminal descending trajectory must not arm.
+        accumulate(detector.update(sample(5, 0, 0, 8.5, 280, 180)), counts);
+        accumulate(detector.update(sample(5, 0, 0, 8.2, 281, 180)), counts);
+        accumulate(detector.update(occlusion_gap(ContactInputStatusV1::StereoLow, 281, 181)), counts);
+        accumulate(detector.update(occlusion_gap(ContactInputStatusV1::StereoLow, 282, 181)), counts);
+        require(counts.down == 0, "stationary near-surface hover plus dropout must not be interpreted as contact");
+    }
+    {
+        TouchContactDetectorV1 detector; Counts counts;
+        accumulate(detector.update(sample(6, 0, 0, 24.0, 260, 170)), counts);
+        accumulate(detector.update(sample(6, 0, 0, 7.0, 261, 173)), counts);
+        accumulate(detector.update(gap(ContactInputStatusV1::NoHand)), counts);
+        accumulate(detector.update(occlusion_gap(ContactInputStatusV1::StereoLow, 262, 174)), counts);
+        accumulate(detector.update(occlusion_gap(ContactInputStatusV1::StereoLow, 262, 174)), counts);
+        require(counts.down == 0, "NO_HAND must cancel contact occlusion bridge history before DOWN");
+    }
+    {
+        TouchContactDetectorV1 detector; Counts counts;
+        // Ordinary three-metric DOWN keeps the historical metric path. A current
+        // coherent occlusion proxy may sustain HELD, but a proxy loss still UPs.
+        for (double h = 35.0; h >= 11.0; h -= 3.0)
+            accumulate(detector.update(sample(7, 0, 0, h, 250, 160)), counts);
+        accumulate(detector.update(sample(7, 0, 0, 9, 250, 161)), counts);
+        accumulate(detector.update(sample(7, 0, 0, 8, 250, 162)), counts);
+        accumulate(detector.update(sample(7, 0, 0, 7, 250, 163)), counts);
+        require(counts.down == 1, "ordinary validated metric contact path must remain intact");
+        accumulate(detector.update(occlusion_gap(ContactInputStatusV1::StereoLow, 251, 164)), counts);
+        require(counts.up == 0 && counts.held > 0, "coherent contact occlusion proxy may safely preserve an already confirmed hold");
+        accumulate(detector.update(gap(ContactInputStatusV1::StereoLow)), counts);
+        require(counts.up == 1, "loss of 2D proxy during occlusion-held contact must fail-safe UP");
+    }
+
+    std::cout << "Phase 2C.1C contact occlusion bridge + 2C.1B identity + sparse touch semantics self-test: PASS\n";
     return 0;
 }
