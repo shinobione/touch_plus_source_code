@@ -6,7 +6,7 @@ on:
       - 'ractiv-recovery/**'
   pull_request:
     branches:
-      - master
+      - 'ractiv-recovery/ci-base'
   workflow_dispatch:
 
 jobs:
