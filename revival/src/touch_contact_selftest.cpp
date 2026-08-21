@@ -311,6 +311,22 @@ int main() {
                 "physical 21.5 -> 6.3 -> dropout -> 19.3 -> lift regression must produce one DOWN and one UP");
     }
     {
+        // A bridge DOWN followed immediately by a fresh valid metric sample must
+        // enter HELD, not fall back into ContactCandidate and emit a second DOWN.
+        TouchContactDetectorV1 detector; Counts counts;
+        accumulate(detector.update(sample(31, 0.0, 0.0, 21.5, 410, 210)), counts);
+        accumulate(detector.update(sample(31, 0.3, 0.0, 6.3, 411, 211)), counts);
+        accumulate(detector.update(occlusion_gap(ContactInputStatusV1::AnatomyRejected, 412, 212)), counts);
+        const auto down = detector.update(occlusion_gap(ContactInputStatusV1::StereoLow, 412, 212));
+        accumulate(down, counts);
+        require(down.event == ContactEventV1::Down && down.state == ContactStateV1::TouchDown,
+                "occlusion bridge confirmation must persist internal TOUCH_DOWN state");
+        const auto reacquired = detector.update(sample(31, 0.4, 0.0, 6.0, 412, 212));
+        accumulate(reacquired, counts);
+        require(reacquired.state == ContactStateV1::TouchHeld && reacquired.event == ContactEventV1::Held && counts.down == 1,
+                "valid metric reacquisition immediately after bridge DOWN must become HELD with no duplicate DOWN");
+    }
+    {
         TouchContactDetectorV1 detector; Counts counts;
         accumulate(detector.update(sample(4, 0, 0, 28.0, 300, 200)), counts);
         accumulate(detector.update(sample(4, 0, 0, 8.0, 301, 201)), counts);
