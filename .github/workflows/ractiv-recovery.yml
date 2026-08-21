@@ -1,0 +1,51 @@
+name: Ractiv Recovery
+
+on:
+  push:
+    branches:
+      - 'ractiv-recovery/**'
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  source-gates:
+    name: Integrated July + LOG_ONLY safety gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify historical wiring and recovery patch safety
+        run: python ractiv_recovery/source_gate.py
+
+      - name: Upload source-gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ractiv-recovery-source-gate-report
+          path: ractiv_recovery/source-gate-report.json
+
+  build-archaeology:
+    name: VS2022 compatibility build probe
+    runs-on: windows-latest
+    needs: source-gates
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run non-blocking historical build probe
+        shell: pwsh
+        run: ./ractiv_recovery/build_probe.ps1
+
+      - name: Upload exact build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ractiv-recovery-build-probe
+          path: |
+            ractiv_recovery/build-probe.log
+            ractiv_recovery/build-probe-status.json
+          if-no-files-found: warn
