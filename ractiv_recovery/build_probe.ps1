@@ -15,12 +15,16 @@ $env:DIRECTSHOW_DIR = (Resolve-Path (Join-Path $root "dependencies\DirectShow"))
 $env:SFML_DIR = (Resolve-Path (Join-Path $root "dependencies\SFML")).Path
 
 $project = Join-Path $root "track_plus_visual_studio\track_plus\track_plus.vcxproj"
-$patch = Join-Path $root "ractiv_recovery\patches\0001-log-only-bringup.patch"
+$patchDir = Join-Path $root "ractiv_recovery\patches"
+$patches = Get-ChildItem $patchDir -Filter "*.patch" | Sort-Object Name
 
-Write-Host "[RACTIV_RECOVERY] Applying LOG_ONLY compatibility patch to CI checkout"
-& git -C $root apply $patch
-if ($LASTEXITCODE -ne 0) {
-    throw "git apply failed"
+Write-Host "[RACTIV_RECOVERY] Applying compatibility patch series to CI checkout"
+foreach ($patch in $patches) {
+    Write-Host "  -> $($patch.Name)"
+    & git -C $root apply $patch.FullName
+    if ($LASTEXITCODE -ne 0) {
+        throw "git apply failed for $($patch.Name)"
+    }
 }
 
 $msbuild = (Get-Command msbuild.exe -ErrorAction Stop).Source
@@ -49,6 +53,7 @@ $result = [ordered]@{
     probe_toolset = "v143"
     configuration = $Configuration
     platform = $Platform
+    patches_applied = @($patches.Name)
     msbuild_exit_code = $code
     compile_succeeded = ($code -eq 0)
     started_utc = $started.ToUniversalTime().ToString("o")
