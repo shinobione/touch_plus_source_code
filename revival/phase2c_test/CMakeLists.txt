@@ -23,6 +23,23 @@ if(MSVC)
     target_compile_options(touchplus_touch_contact_selftest PRIVATE /W4 /permissive- /EHsc)
 endif()
 
+add_executable(touchplus_touch_contact_handoff_selftest
+    ../src/touch_contact_handoff_selftest.cpp
+)
+target_compile_features(touchplus_touch_contact_handoff_selftest PRIVATE cxx_std_20)
+target_compile_definitions(touchplus_touch_contact_handoff_selftest PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+)
+target_include_directories(touchplus_touch_contact_handoff_selftest PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+)
+if(MSVC)
+    set_property(TARGET touchplus_touch_contact_handoff_selftest PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    )
+    target_compile_options(touchplus_touch_contact_handoff_selftest PRIVATE /W4 /permissive- /EHsc)
+endif()
+
 # The live Touch+ runtime still depends on the recovered 32-bit Etron SDK.
 # Phase 2C.1 therefore builds a dedicated Win32 wrapper executable while the
 # semantic state machine itself remains independently testable in x64 CI.
@@ -42,9 +59,8 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${CMAKE_CURRENT_SOURCE_DIR}/../src"
     )
     if(MSVC)
-        # Phase 2C.1 force-includes a semantic wrapper which in turn includes
-        # the accepted 2B.9C.2 runtime. No accepted tracker/depth source is
-        # modified by this slice.
+        # Phase 2C force-includes a semantic wrapper which in turn includes the
+        # accepted 2B.9C.2 runtime. No accepted tracker/depth source is modified.
         target_compile_options(touchplus_phase2c_tracker PRIVATE
             "/FI${CMAKE_CURRENT_SOURCE_DIR}/../src/touch_contact_runtime.h"
         )
