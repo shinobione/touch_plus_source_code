@@ -15,7 +15,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 
 # The bundled OpenCV/Etron/TurboJPEG import libraries were built for the old
-# Win32 MSVC runtime.  Use the dynamic CRT, matching the historical Release
+# Win32 MSVC runtime. Use the dynamic CRT, matching the historical Release
 # project closely and avoiding accidental /MT ABI mismatches.
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
@@ -30,42 +30,39 @@ set(ETRON "${DEPS}/Etron")
 set(TURBOJPEG "${DEPS}/TurboJPEG")
 set(DIRECTSHOW "${DEPS}/DirectShow")
 
-# This is intentionally NOT the historical product target.  It links only the
-# July vision/anatomy stages needed for the first hardware smoke and excludes:
-#   main.cpp / IPC / UDP / Reprojector / PointerMapper / HandResolver / tools.
-# Therefore no legacy OS-input path can be reached from this executable.
+# This is intentionally NOT the historical product target. It compiles the
+# smallest practical source closure for the first July-vision hardware smoke.
+# Explicitly excluded: historical main.cpp, IPC, UDP, Reprojector,
+# PointerMapper, HandResolver/output mapping, tool mode and all Windows cursor
+# executables. No legacy OS-input path can therefore be reached from this EXE.
 set(RACTIV_RECOVERY_SOURCES
     "${CMAKE_CURRENT_LIST_DIR}/log_only_main.cpp"
 
-    "${CORE}/blob_detector_new.cpp"
-    "${CORE}/blob_new.cpp"
+    # Device + stereo capture / recovered sensor initialization.
     "${CORE}/Camera.cpp"
     "${CORE}/CameraDS.cpp"
+    "${CORE}/RactivJPEGDecompressor.cpp"
     "${CORE}/camera_initializer_new.cpp"
+
+    # Exact July segmentation/anatomy stages used by the minimal entrypoint.
+    "${CORE}/blob_detector_new.cpp"
+    "${CORE}/blob_new.cpp"
     "${CORE}/contour_functions.cpp"
-    "${CORE}/curve_fitting.cpp"
-    "${CORE}/c_tracker.cpp"
-    "${CORE}/exponential.cpp"
-    "${CORE}/filesystem.cpp"
     "${CORE}/foreground_extractor_new.cpp"
-    "${CORE}/globals.cpp"
     "${CORE}/hand_splitter_new.cpp"
+    "${CORE}/mono_processor_new.cpp"
+    "${CORE}/motion_processor_new.cpp"
+    "${CORE}/pose_estimator.cpp"
+
+    # Shared utilities required by the above stages.
+    "${CORE}/filesystem.cpp"
+    "${CORE}/globals.cpp"
     "${CORE}/histogram_builder.cpp"
-    "${CORE}/hungarian.cpp"
-    "${CORE}/kalman.cpp"
-    "${CORE}/lmcurve.c"
-    "${CORE}/lmmin.c"
     "${CORE}/low_pass_filter.cpp"
     "${CORE}/math_plus.cpp"
     "${CORE}/mat_functions.cpp"
-    "${CORE}/mono_processor_new.cpp"
-    "${CORE}/motion_processor_new.cpp"
     "${CORE}/permutation.cpp"
-    "${CORE}/pose_estimator.cpp"
-    "${CORE}/quadratic.cpp"
-    "${CORE}/RactivJPEGDecompressor.cpp"
     "${CORE}/string_functions.cpp"
-    "${CORE}/thinning_computer_new.cpp"
     "${CORE}/value_store.cpp"
 )
 
@@ -105,8 +102,8 @@ if(MSVC)
     )
 endif()
 
-# Use explicit absolute paths for the historical third-party import libraries;
-# this prevents a developer machine from silently substituting another OpenCV.
+# Use explicit absolute paths for the bundled historical import libraries so a
+# developer machine cannot silently substitute another OpenCV/Etron build.
 set(OPENCV_LIBS
     "${OPENCV_LIB}/opencv_core249.lib"
     "${OPENCV_LIB}/opencv_highgui249.lib"
@@ -151,4 +148,4 @@ target_link_libraries(touchplus_ractiv_log_only PRIVATE
 
 message(STATUS "Touch+ Ractiv Recovery target: minimal LOG_ONLY Win32")
 message(STATUS "Historical core: ${CORE}")
-message(STATUS "OS input / PointerMapper / UDP: excluded from target")
+message(STATUS "OS input / PointerMapper / Reprojector / IPC / UDP: excluded")
