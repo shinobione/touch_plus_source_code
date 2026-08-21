@@ -36,9 +36,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Configure MSBuild
+        uses: microsoft/setup-msbuild@v2
+
       - name: Run non-blocking historical build probe
         shell: pwsh
         run: ./ractiv_recovery/build_probe.ps1
+
+      - name: Package LOG_ONLY runtime if compile succeeded
+        shell: pwsh
+        run: ./ractiv_recovery/package_log_only.ps1
 
       - name: Upload exact build evidence
         if: always()
@@ -49,3 +56,13 @@ jobs:
             ractiv_recovery/build-probe.log
             ractiv_recovery/build-probe-status.json
           if-no-files-found: warn
+
+      - name: Upload safe LOG_ONLY runtime
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchplus-ractiv-recovery-log-only-windows-x86
+          path: |
+            ractiv_recovery/out/touchplus-ractiv-log-only-windows-x86.zip
+            ractiv_recovery/out/package-manifest.json
+          if-no-files-found: ignore
