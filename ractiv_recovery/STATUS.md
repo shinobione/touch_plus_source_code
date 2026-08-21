@@ -25,4 +25,9 @@ Compatibility patch series:
 1. `0001-log-only-bringup.patch`
 2. `0002-portable-vs-project.patch`
 
+CI synchronization note:
+
+- the PR-base workflow now targets `ractiv-recovery/ci-base` correctly;
+- this head update intentionally retriggers PR CI so the next decision can use exact compiler/linker evidence rather than archaeology guesses.
+
 Next decision is driven by the exact `ractiv-recovery-build-probe` CI artifact, not by guesswork.
