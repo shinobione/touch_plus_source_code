@@ -481,6 +481,7 @@ private:
             ++occlusion_confirm_count_;
             state_ = ContactStateV1::ContactCandidate;
             if (occlusion_confirm_count_ >= config_.occlusion_confirm_frames) {
+                state_ = ContactStateV1::TouchDown;
                 held_ = true;
                 occlusion_hold_allowed_ = true;
                 occlusion_held_ = true;
