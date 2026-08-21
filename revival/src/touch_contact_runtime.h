@@ -1,11 +1,12 @@
 #pragma once
 
-// Phase 2C.1C is a semantic layer on top of the accepted Phase 2B fingertip
+// Phase 2C.1C.1 is a semantic layer on top of the accepted Phase 2B fingertip
 // stream. It force-includes the complete 2B.9C.2 runtime first, then wraps its
 // final valid fingertip output without changing camera/surface calibration,
 // landmark ownership, stereo matching, persistent capture, or Phase 2B raw ids.
 #include "depth_surface_frame_runtime.h"
 #include "touch_contact_identity_v1.h"
+#include "touch_contact_precontact_handoff_v1.h"
 #include "touch_contact_v1.h"
 
 #ifdef point_depth
@@ -51,22 +52,30 @@ struct RuntimeOcclusionProxyV1 {
 struct RuntimeContactState {
     touchplus::contact::TouchContactDetectorV1 detector;
     touchplus::contact::ContactIdentityContinuityV1 identity_continuity;
+    touchplus::contact::ContactPrecontactIdentityHandoffV1 precontact_handoff;
     touchplus::contact::ContactIdentityDecisionV1 identity_decision;
+    touchplus::contact::ContactPrecontactHandoffDecisionV1 handoff_decision;
     touchplus::contact::ContactResultV1 result;
     std::uint64_t raw_identity_id = 0;
+    std::uint64_t adapter_contact_identity_id = 0;
     touchplus::contact::ContactIdentitySourceV1 raw_identity_source = touchplus::contact::ContactIdentitySourceV1::Unknown;
     std::string identity_alias_reason = "identity-unavailable";
+    bool precontact_handoff_applied = false;
+    std::string precontact_handoff_reason = "precontact-handoff-unavailable";
     bool occlusion_proxy_valid = false;
     std::string occlusion_proxy_reason = "occlusion-proxy-unavailable";
     bool announced = false;
     bool have_logged_state = false;
     bool have_logged_input = false;
     std::uint64_t last_logged_raw_identity_id = 0;
+    std::uint64_t last_logged_adapter_contact_identity_id = 0;
     std::uint64_t last_logged_contact_identity_id = 0;
     touchplus::contact::ContactIdentitySourceV1 last_logged_identity_source = touchplus::contact::ContactIdentitySourceV1::Unknown;
     touchplus::contact::ContactOcclusionStateV1 last_logged_bridge = touchplus::contact::ContactOcclusionStateV1::Disarmed;
+    bool last_logged_handoff_applied = false;
     bool last_logged_proxy_valid = false;
     std::string last_logged_alias_reason;
+    std::string last_logged_handoff_reason;
     std::string last_logged_proxy_reason;
     touchplus::contact::ContactStateV1 last_logged_state = touchplus::contact::ContactStateV1::NoFinger;
     touchplus::contact::ContactInputStatusV1 last_logged_input = touchplus::contact::ContactInputStatusV1::NoFreshMetric;
@@ -81,12 +90,14 @@ inline RuntimeContactState& state() {
 inline void announce_once(RuntimeContactState& s) {
     if (s.announced) return;
     s.announced = true;
-    std::cout << "\n[CONTACT] PHASE 2C.1C CONTACT OCCLUSION BRIDGE ACTIVE | OS_INJECTION=DISABLED\n";
+    std::cout << "\n[CONTACT] PHASE 2C.1C.1 DEFERRED PRECONTACT IDENTITY HANDOFF ACTIVE | OS_INJECTION=DISABLED\n";
     std::cout << "[CONTACT] Input ownership: accepted Phase 2B fingertip only. model Z remains disabled.\n";
     std::cout << "[CONTACT] Metric path unchanged: DOWN<=12 mm, RELEASE>=22 mm, 3 VALID near samples.\n";
-    std::cout << "[CONTACT] Occlusion bridge: two recent VALID descending metric samples may ARM only when the terminal trajectory predicts the surface.\n";
-    std::cout << "[CONTACT] Two current 2D-coherent occlusion frames may then confirm contact; they NEVER add H/XY or increment near_count.\n";
-    std::cout << "[CONTACT] Bridge hold requires a current compatible 2D proxy every invalid frame; hard loss/contradiction remains fail-safe UP.\n";
+    std::cout << "[CONTACT] 2C.1B adapter epochs remain strict; cross-mode-after-gap still creates a NEW adapter contact id.\n";
+    std::cout << "[CONTACT] 2C.1C.1 may preserve detector pre-contact history only for a recent near-surface descending cross-mode handoff.\n";
+    std::cout << "[CONTACT] Handoff gates: current H<=10 mm, drop>=5 mm, predicted H<=2 mm, XY<=16 mm, tip delta<=22 px, age<=4 frames.\n";
+    std::cout << "[CONTACT] Occlusion bridge: two current 2D-coherent frames may confirm only after real metric history ARMS it; they NEVER add H/XY or near_count.\n";
+    std::cout << "[CONTACT] Hard loss, motion-reset, same-source id switch, stale history or 2D contradiction remain fail-closed.\n";
     std::cout << "[CONTACT] Phase 2B, K/D/R/T/P/Q, surface frame and stereo matcher remain unchanged.\n";
 }
 
@@ -127,7 +138,7 @@ inline RuntimeOcclusionProxyV1 derive_contact_occlusion_proxy(
         out.reason = "occlusion-proxy-hard-input";
         return out;
     }
-    if (s.identity_continuity.current_contact_identity_id() == 0) {
+    if (s.precontact_handoff.current_detector_identity_id() == 0) {
         out.reason = "occlusion-proxy-no-contact-identity";
         return out;
     }
@@ -190,9 +201,9 @@ inline RuntimeOcclusionProxyV1 derive_contact_occlusion_proxy(
     }
 
     constexpr std::uint64_t anatomy_high_bit = 0x8000000000000000ULL;
-    if (anatomy_decision.anatomy_id != 0 && s.identity_continuity.anatomy_raw_id() != 0) {
+    if (anatomy_decision.anatomy_id != 0 && s.precontact_handoff.anatomy_raw_id() != 0) {
         const std::uint64_t current_anatomy_raw = anatomy_high_bit | anatomy_decision.anatomy_id;
-        if (current_anatomy_raw != s.identity_continuity.anatomy_raw_id()) {
+        if (current_anatomy_raw != s.precontact_handoff.anatomy_raw_id()) {
             out.reason = "occlusion-proxy-anatomy-id-contradiction";
             return out;
         }
@@ -201,14 +212,14 @@ inline RuntimeOcclusionProxyV1 derive_contact_occlusion_proxy(
     if (fusion.identity_id != 0) {
         const auto source = contact_identity_source_from_fusion(fusion.mode);
         if (source == touchplus::contact::ContactIdentitySourceV1::GeometryAnatomy &&
-            s.identity_continuity.geometry_raw_id() != 0 &&
-            fusion.identity_id != s.identity_continuity.geometry_raw_id()) {
+            s.precontact_handoff.geometry_raw_id() != 0 &&
+            fusion.identity_id != s.precontact_handoff.geometry_raw_id()) {
             out.reason = "occlusion-proxy-geometry-id-contradiction";
             return out;
         }
         if (source == touchplus::contact::ContactIdentitySourceV1::AnatomyOnly &&
-            s.identity_continuity.anatomy_raw_id() != 0 &&
-            fusion.identity_id != s.identity_continuity.anatomy_raw_id()) {
+            s.precontact_handoff.anatomy_raw_id() != 0 &&
+            fusion.identity_id != s.precontact_handoff.anatomy_raw_id()) {
             out.reason = "occlusion-proxy-anatomy-raw-contradiction";
             return out;
         }
@@ -227,9 +238,12 @@ inline void log_transition(RuntimeContactState& s) {
     const bool state_changed = !s.have_logged_state || s.result.state != s.last_logged_state;
     const bool input_changed = !s.have_logged_input || s.result.input_status != s.last_logged_input;
     const bool identity_changed = s.raw_identity_id != s.last_logged_raw_identity_id ||
+        s.adapter_contact_identity_id != s.last_logged_adapter_contact_identity_id ||
         s.result.identity_id != s.last_logged_contact_identity_id ||
         s.raw_identity_source != s.last_logged_identity_source ||
-        s.identity_alias_reason != s.last_logged_alias_reason;
+        s.identity_alias_reason != s.last_logged_alias_reason ||
+        s.precontact_handoff_applied != s.last_logged_handoff_applied ||
+        s.precontact_handoff_reason != s.last_logged_handoff_reason;
     const bool bridge_changed = s.result.contact_bridge != s.last_logged_bridge ||
         s.occlusion_proxy_valid != s.last_logged_proxy_valid ||
         s.occlusion_proxy_reason != s.last_logged_proxy_reason;
@@ -240,9 +254,18 @@ inline void log_transition(RuntimeContactState& s) {
         << " | event=" << touchplus::contact::contact_event_name_v1(s.result.event)
         << " | input=" << touchplus::contact::contact_input_status_name_v1(s.result.input_status)
         << " | raw_identity_id=" << s.raw_identity_id
+        << " | adapter_contact_identity_id=" << s.adapter_contact_identity_id
         << " | contact_identity_id=" << s.result.identity_id
         << " | identity_source=" << touchplus::contact::contact_identity_source_name_v1(s.raw_identity_source)
         << " | identity_alias=" << s.identity_alias_reason
+        << " | precontact_history=" << (s.precontact_handoff_applied ? "HANDOFF" : "NONE")
+        << " | handoff_reason=" << s.precontact_handoff_reason
+        << " | handoff_from_adapter_id=" << s.handoff_decision.previous_adapter_contact_identity_id
+        << " | handoff_age=" << s.handoff_decision.last_valid_age_frames
+        << " | handoff_drop=" << s.handoff_decision.terminal_drop_mm << " mm"
+        << " | handoff_predicted_H=" << s.handoff_decision.predicted_next_h_mm << " mm"
+        << " | handoff_xy=" << s.handoff_decision.xy_delta_mm << " mm"
+        << " | handoff_tip_delta=" << s.handoff_decision.tip_delta_px << " px"
         << " | contact_bridge=" << touchplus::contact::contact_occlusion_state_name_v1(s.result.contact_bridge)
         << " | occlusion_proxy=" << (s.occlusion_proxy_valid ? "VALID" : "NONE")
         << " | proxy_reason=" << s.occlusion_proxy_reason
@@ -265,11 +288,14 @@ inline void log_transition(RuntimeContactState& s) {
     s.last_logged_state = s.result.state;
     s.last_logged_input = s.result.input_status;
     s.last_logged_raw_identity_id = s.raw_identity_id;
+    s.last_logged_adapter_contact_identity_id = s.adapter_contact_identity_id;
     s.last_logged_contact_identity_id = s.result.identity_id;
     s.last_logged_identity_source = s.raw_identity_source;
     s.last_logged_bridge = s.result.contact_bridge;
+    s.last_logged_handoff_applied = s.precontact_handoff_applied;
     s.last_logged_proxy_valid = s.occlusion_proxy_valid;
     s.last_logged_alias_reason = s.identity_alias_reason;
+    s.last_logged_handoff_reason = s.precontact_handoff_reason;
     s.last_logged_proxy_reason = s.occlusion_proxy_reason;
     s.have_logged_state = true;
     s.have_logged_input = true;
@@ -287,6 +313,8 @@ inline void update_from_tracking() {
     s.raw_identity_source = contact_identity_source_from_fusion(fusion.mode);
     s.occlusion_proxy_valid = false;
     s.occlusion_proxy_reason = "occlusion-proxy-unavailable";
+    s.precontact_handoff_applied = false;
+    s.precontact_handoff_reason = "precontact-handoff-no-valid-sample";
 
     if (sample.input_status == touchplus::contact::ContactInputStatusV1::Valid) {
         touchplus::contact::ContactIdentityObservationV1 identity_obs;
@@ -299,20 +327,33 @@ inline void update_from_tracking() {
         identity_obs.tip_x = fusion.pixel_x;
         identity_obs.tip_y = fusion.pixel_y;
         s.identity_decision = s.identity_continuity.update(identity_obs);
+        s.adapter_contact_identity_id = s.identity_decision.contact_identity_id;
         s.identity_alias_reason = s.identity_decision.reason;
 
         if (s.identity_decision.contact_identity_id != 0) {
-            sample.valid = true;
-            sample.identity_id = s.identity_decision.contact_identity_id;
-            sample.x_mm = tracking.result.smoothed_tip.x_mm;
-            sample.y_mm = tracking.result.smoothed_tip.y_mm;
-            sample.h_mm = tracking.result.smoothed_tip.h_mm;
-            sample.tip_x = fusion.pixel_x;
-            sample.tip_y = fusion.pixel_y;
+            s.handoff_decision = s.precontact_handoff.update(s.identity_decision, identity_obs);
+            s.precontact_handoff_applied = s.handoff_decision.handoff_applied;
+            s.precontact_handoff_reason = s.handoff_decision.reason;
+
+            if (s.handoff_decision.detector_contact_identity_id != 0) {
+                sample.valid = true;
+                sample.identity_id = s.handoff_decision.detector_contact_identity_id;
+                sample.x_mm = tracking.result.smoothed_tip.x_mm;
+                sample.y_mm = tracking.result.smoothed_tip.y_mm;
+                sample.h_mm = tracking.result.smoothed_tip.h_mm;
+                sample.tip_x = fusion.pixel_x;
+                sample.tip_y = fusion.pixel_y;
+            } else {
+                sample.input_status = touchplus::contact::ContactInputStatusV1::IdentityUnknown;
+                s.identity_alias_reason = "precontact-handoff-rejected-valid-sample";
+                s.identity_continuity.note_invalid(touchplus::contact::ContactIdentityInterruptionV1::Transient);
+                s.precontact_handoff.note_invalid(touchplus::contact::ContactIdentityInterruptionV1::Transient);
+            }
         } else {
             sample.input_status = touchplus::contact::ContactInputStatusV1::IdentityUnknown;
             s.identity_alias_reason = "identity-adapter-rejected-valid-sample";
             s.identity_continuity.note_invalid(touchplus::contact::ContactIdentityInterruptionV1::Transient);
+            s.precontact_handoff.note_invalid(touchplus::contact::ContactIdentityInterruptionV1::Transient);
         }
     } else {
         const auto proxy = derive_contact_occlusion_proxy(s, sample.input_status);
@@ -325,14 +366,20 @@ inline void update_from_tracking() {
             sample.tip_y = proxy.tip_y;
         }
 
-        s.identity_continuity.note_invalid(
-            hard_contact_identity_interruption(sample.input_status)
-                ? touchplus::contact::ContactIdentityInterruptionV1::Hard
-                : touchplus::contact::ContactIdentityInterruptionV1::Transient);
+        const auto interruption = hard_contact_identity_interruption(sample.input_status)
+            ? touchplus::contact::ContactIdentityInterruptionV1::Hard
+            : touchplus::contact::ContactIdentityInterruptionV1::Transient;
+        s.identity_continuity.note_invalid(interruption);
+        s.precontact_handoff.note_invalid(interruption);
+        s.adapter_contact_identity_id = s.identity_continuity.current_contact_identity_id();
         s.identity_alias_reason = hard_contact_identity_interruption(sample.input_status)
             ? "identity-hard-invalid-reset"
             : proxy.valid ? "identity-transient-contact-occlusion-proxy"
                           : "identity-transient-gap-no-cross-mode-bridge";
+        s.precontact_handoff_reason = hard_contact_identity_interruption(sample.input_status)
+            ? "precontact-handoff-hard-reset"
+            : proxy.valid ? "precontact-handoff-transient-proxy"
+                          : "precontact-handoff-transient-gap";
     }
 
     s.result = s.detector.update(sample);
@@ -349,9 +396,17 @@ inline void maybe_report(RuntimeContactState& s) {
         << " | event=" << touchplus::contact::contact_event_name_v1(s.result.event)
         << " | input=" << touchplus::contact::contact_input_status_name_v1(s.result.input_status)
         << " | raw_identity_id=" << s.raw_identity_id
+        << " | adapter_contact_identity_id=" << s.adapter_contact_identity_id
         << " | contact_identity_id=" << s.result.identity_id
         << " | identity_source=" << touchplus::contact::contact_identity_source_name_v1(s.raw_identity_source)
         << " | identity_alias=" << s.identity_alias_reason
+        << " | precontact_history=" << (s.precontact_handoff_applied ? "HANDOFF" : "NONE")
+        << " | handoff_reason=" << s.precontact_handoff_reason
+        << " | handoff_age=" << s.handoff_decision.last_valid_age_frames
+        << " | handoff_drop=" << s.handoff_decision.terminal_drop_mm << " mm"
+        << " | handoff_predicted_H=" << s.handoff_decision.predicted_next_h_mm << " mm"
+        << " | handoff_xy=" << s.handoff_decision.xy_delta_mm << " mm"
+        << " | handoff_tip_delta=" << s.handoff_decision.tip_delta_px << " px"
         << " | contact_bridge=" << touchplus::contact::contact_occlusion_state_name_v1(s.result.contact_bridge)
         << " | occlusion_proxy=" << (s.occlusion_proxy_valid ? "VALID" : "NONE")
         << " | proxy_reason=" << s.occlusion_proxy_reason
