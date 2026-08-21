@@ -1,0 +1,129 @@
+diff --git a/track_plus_core/track_plus/main.cpp b/track_plus_core/track_plus/main.cpp
+--- a/track_plus_core/track_plus/main.cpp
++++ b/track_plus_core/track_plus/main.cpp
+@@
+ int val_diff_old = 9999;
+ int frame_num = 0;
++
++// Ractiv Recovery defaults: preserve the historical pipeline while making the
++// first hardware bring-up observational only.  These flags are injected by the
++// recovery patch and intentionally do not live on the historical master branch.
++bool ractiv_recovery_log_only = true;
++bool ractiv_recovery_skip_legacy_calibration = true;
+ //
+ 
+ void wait_for_device()
+@@
+ void hide_cursors()
+ {
++	if (ractiv_recovery_log_only)
++	{
++		show_cursor_index = false;
++		show_cursor_thumb = false;
++		return;
++	}
++
+ 	if (!show_cursor_index && !show_cursor_thumb)
+ 		return;
+@@
+-	reprojector.load(*ipc);
++	if (!ractiv_recovery_skip_legacy_calibration)
++		reprojector.load(*ipc);
++	else
++		COUT << "[RACTIV_RECOVERY] legacy factory calibration loader bypassed for 2D bring-up" << endl;
++
+ 	CameraInitializerNew::init(camera);
+ 	pose_estimator.init();
+ 
+-	if (mode == "surface")
++	if (ractiv_recovery_log_only)
++	{
++		child_module_name = "";
++		child_module_path = "";
++		COUT << "[RACTIV_RECOVERY] LOG_ONLY active: win_cursor_plus launch and OS injection disabled" << endl;
++	}
++	else if (mode == "surface")
+ 	{
+ 		child_module_name = "win_cursor_plus";
+@@
+-			if (pose_name == "point")
++			if (ractiv_recovery_skip_legacy_calibration)
++			{
++				initialized = true;
++
++				static int recovery_report_counter = 0;
++				++recovery_report_counter;
++				if ((recovery_report_counter % 15) == 0)
++				{
++					COUT << "[RACTIV_RECOVERY] frame=" << frame_num
++						 << " mono0_points=" << mono_processor0.points_unwrapped_result.size()
++						 << " mono1_points=" << mono_processor1.points_unwrapped_result.size()
++						 << " pose=" << pose_name
++						 << " output=LOG_ONLY_2D" << endl;
++				}
++			}
++			else if (pose_name == "point")
+ 			{
+@@
+-		if (!pinch_to_zoom)
++		if (!ractiv_recovery_log_only)
+ 		{
+-			if (show_cursor_index)
++			if (!pinch_to_zoom)
+ 			{
+-				ipc->send_udp_message("win_cursor_plus", to_string(pointer_mapper.pt_cursor_index.x) + "!" +
+-														 to_string(pointer_mapper.pt_cursor_index.y) + "!" +
+-														 to_string(pointer_mapper.dist_cursor_index_plane) + "!" +
+-														 to_string(pointer_mapper.index_down) + "!index");
++				if (show_cursor_index)
++				{
++					ipc->send_udp_message("win_cursor_plus", to_string(pointer_mapper.pt_cursor_index.x) + "!" +
++															 to_string(pointer_mapper.pt_cursor_index.y) + "!" +
++															 to_string(pointer_mapper.dist_cursor_index_plane) + "!" +
++															 to_string(pointer_mapper.index_down) + "!index");
++				}
++				else
++					ipc->send_udp_message("win_cursor_plus", "hide_cursor_index");
++
++				ipc->send_udp_message("win_cursor_plus", "hide_cursor_thumb");
+ 			}
+ 			else
+-				ipc->send_udp_message("win_cursor_plus", "hide_cursor_index");
+-
+-			ipc->send_udp_message("win_cursor_plus", "hide_cursor_thumb");
+-		}
+-		else
+-		{
+-			ipc->send_udp_message("win_cursor_plus", to_string(pointer_mapper.pt_pinch_to_zoom_index.x) + "!" +
+-													 to_string(pointer_mapper.pt_pinch_to_zoom_index.y) + "!0!1!index");
++			{
++				ipc->send_udp_message("win_cursor_plus", to_string(pointer_mapper.pt_pinch_to_zoom_index.x) + "!" +
++														 to_string(pointer_mapper.pt_pinch_to_zoom_index.y) + "!0!1!index");
+ 
+-			ipc->send_udp_message("win_cursor_plus", to_string(pointer_mapper.pt_pinch_to_zoom_thumb.x) + "!" +
+-													 to_string(pointer_mapper.pt_pinch_to_zoom_thumb.y) + "!0!1!thumb");
+-		}
++				ipc->send_udp_message("win_cursor_plus", to_string(pointer_mapper.pt_pinch_to_zoom_thumb.x) + "!" +
++														 to_string(pointer_mapper.pt_pinch_to_zoom_thumb.y) + "!0!1!thumb");
++			}
+ 
+-		ipc->send_udp_message("win_cursor_plus", "update!" + to_string(frame_num));
++			ipc->send_udp_message("win_cursor_plus", "update!" + to_string(frame_num));
++		}
+ 	}
+@@
+-		if (child_module_name != "" && process_running(child_module_name + ".exe") == 0)
++		if (!ractiv_recovery_log_only && child_module_name != "" && process_running(child_module_name + ".exe") == 0)
+ 			create_process(child_module_path, child_module_name + ".exe", true, true);
+@@
+ 	camera = new Camera(true, 1280, 480, update);
+ 	load_settings();
++
++	if (ractiv_recovery_log_only)
++	{
++		settings.touch_control = "1";
++		settings.power_saving_mode = "0";
++		COUT << "[RACTIV_RECOVERY] historical surface pipeline forced ON in LOG_ONLY mode" << endl;
++	}
+ 
+ 	while (true)
