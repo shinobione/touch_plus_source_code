@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Source-level gates for the first Ractiv recovery boundary.
 
-This deliberately does not claim that the 2015 product is runnable.  It proves
+This deliberately does not claim that the 2015 product is runnable. It proves
 that the recovery branch is anchored to the integrated July pipeline and that
-our first compatibility patch remains observational/log-only.
+the compatibility patch series remains observational/log-only and portable.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ MAIN = ROOT / "track_plus_core" / "track_plus" / "main.cpp"
 POINTER = ROOT / "track_plus_core" / "track_plus" / "pointer_mapper.cpp"
 CURSOR = ROOT / "track_plus_visual_studio" / "win_cursor_plus" / "MainWindow.xaml.cs"
 PROJECT = ROOT / "track_plus_visual_studio" / "track_plus" / "track_plus.vcxproj"
-PATCH = ROOT / "ractiv_recovery" / "patches" / "0001-log-only-bringup.patch"
+PATCH_DIR = ROOT / "ractiv_recovery" / "patches"
 REPORT = ROOT / "ractiv_recovery" / "source-gate-report.json"
 
 
@@ -25,7 +25,7 @@ def require(text: str, needle: str, label: str, results: dict[str, object]) -> N
     ok = needle in text
     results[label] = ok
     if not ok:
-        raise SystemExit(f"FAIL: missing historical invariant: {label}: {needle}")
+        raise SystemExit(f"FAIL: missing invariant: {label}: {needle}")
 
 
 def main() -> int:
@@ -33,11 +33,13 @@ def main() -> int:
     pointer_cpp = POINTER.read_text(encoding="utf-8-sig")
     cursor_cs = CURSOR.read_text(encoding="utf-8-sig")
     project_xml = PROJECT.read_text(encoding="utf-8-sig")
-    patch_text = PATCH.read_text(encoding="utf-8")
+    patches = sorted(PATCH_DIR.glob("*.patch"))
+    patch_text = "\n".join(p.read_text(encoding="utf-8") for p in patches)
 
     results: dict[str, object] = {
         "boundary": "R0/R1 integrated-July archaeology + log-only safety",
         "historical_source_unchanged_on_branch": True,
+        "patch_series": [p.name for p in patches],
     }
 
     # Integrated July pipeline invariants.
@@ -53,35 +55,40 @@ def main() -> int:
     require(main_cpp, "pointer_mapper.compute", "pointer_mapper_stage", results)
     require(main_cpp, "send_udp_message(\"win_cursor_plus\"", "historical_cursor_transport", results)
 
-    # Historical interaction semantics/output really exist; they are not enabled by the recovery patch.
+    # Historical interaction/output exists but must remain unreachable in R0/R1 LOG_ONLY mode.
     require(pointer_cpp, "dist_target_plane <= actuation_dist", "historical_down_threshold", results)
     require(pointer_cpp, "dist_target_plane > actuation_dist + 5", "historical_release_hysteresis", results)
     require(cursor_cs, "TouchInjector.InjectTouchInput", "historical_windows_touch_injection", results)
     require(cursor_cs, "mouse_event(MOUSEEVENTF_LEFTDOWN", "historical_mouse_fallback", results)
 
-    # Toolchain archaeology facts we need to keep visible until the project is rebuilt reproducibly.
+    # Toolchain archaeology facts remain visible in the untouched source.
     require(project_xml, "<PlatformToolset>v120</PlatformToolset>", "historical_vs2013_toolset", results)
     results["contains_historical_absolute_path"] = "C:\\External Storage\\Dropbox" in project_xml
 
-    # Recovery patch must apply to the untouched historical source.
-    proc = subprocess.run(
-        ["git", "apply", "--check", str(PATCH.relative_to(ROOT))],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-    )
-    results["log_only_patch_applies_cleanly"] = proc.returncode == 0
+    if not patches:
+        raise SystemExit("FAIL: no Ractiv Recovery compatibility patches found")
+
+    # Git can validate the complete ordered patch series without mutating the checkout.
+    cmd = ["git", "apply", "--check", *[str(p.relative_to(ROOT)) for p in patches]]
+    proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True)
+    results["patch_series_applies_cleanly"] = proc.returncode == 0
     results["git_apply_stderr"] = proc.stderr.strip()
     if proc.returncode != 0:
         REPORT.write_text(json.dumps(results, indent=2), encoding="utf-8")
-        raise SystemExit("FAIL: log-only recovery patch no longer applies cleanly")
+        raise SystemExit("FAIL: compatibility patch series no longer applies cleanly")
 
-    # Safety assertions on the compatibility patch itself.
+    # Safety assertions on the runtime compatibility patch.
     require(patch_text, "ractiv_recovery_log_only = true", "log_only_default_true", results)
     require(patch_text, "ractiv_recovery_skip_legacy_calibration = true", "dead_cdn_bypass_default_true", results)
     require(patch_text, "LOG_ONLY active: win_cursor_plus launch and OS injection disabled", "explicit_no_injection_banner", results)
     require(patch_text, "!ractiv_recovery_log_only && child_module_name", "cursor_child_spawn_guard", results)
     require(patch_text, "output=LOG_ONLY_2D", "2d_diagnostic_output", results)
+
+    # Portability assertions on the project compatibility patch.
+    require(patch_text, "<PlatformToolset>v143</PlatformToolset>", "modern_probe_toolset", results)
+    require(patch_text, "..\\..\\track_plus_core\\track_plus\\imu.h", "portable_imu_project_path", results)
+    require(patch_text, "dependencies\\OpenCV\\build\\x86\\vc12\\lib", "bundled_opencv_lib_path", results)
+    require(patch_text, "dependencies\\Etron", "bundled_etron_path", results)
 
     REPORT.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(json.dumps(results, indent=2))
