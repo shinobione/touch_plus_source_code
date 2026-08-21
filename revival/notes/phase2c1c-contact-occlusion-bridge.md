@@ -1,6 +1,6 @@
 # Phase 2C.1C — contact occlusion bridge
 
-Status: **IMPLEMENTED / SYNTHETIC CI PENDING / PHYSICAL RETEST REQUIRED / NO OS INJECTION**
+Status: **IMPLEMENTED / SYNTHETIC CI PASS / PHYSICAL RETEST REQUIRED / NO OS INJECTION**
 
 Phase 2C.1C addresses the real-hardware “last centimetre” failure class observed after Phase 2C.1B passed its cross-fusion identity boundary.
 
@@ -148,6 +148,8 @@ event=DOWN
 reason=touch-confirmed-contact-occlusion-bridge
 ```
 
+The detector persists its internal state as `TOUCH_DOWN` at this edge; the next valid metric sample must transition to `TOUCH_HELD` rather than re-entering candidate logic or emitting a duplicate DOWN.
+
 Once a touch is active, a current coherent 2D occlusion proxy may sustain `HELD` while metric Z remains unavailable. A hard interruption, identity contradiction, or loss of the 2D proxy still produces fail-safe `UP`.
 
 When metric fingertip data returns, the ordinary release hysteresis / jump safety logic resumes. The bridge never synthesizes a fake H value.
@@ -203,6 +205,20 @@ Negative regressions include:
 - stationary near-surface hover without terminal descent -> no bridge DOWN;
 - `NO_HAND` interruption -> bridge history destroyed;
 - ordinary metric contact path remains intact;
-- active contact with no current 2D proxy -> fail-safe UP.
+- active contact with no current 2D proxy -> fail-safe UP;
+- bridge DOWN followed immediately by a valid metric sample -> `TOUCH_HELD`, never a duplicate DOWN.
+
+## CI evidence
+
+The implementation head `4628266bfb4645eb322dc013bcc969304befe22f` passed the complete exact-head candidate matrix before this documentation-only closeout commit:
+
+```text
+Revival Touch Contact #44  SUCCESS
+Revival Fingertip 3D #163  SUCCESS
+Revival Windows Build #338 SUCCESS
+Revival Surface Frame #182 SUCCESS
+```
+
+The dedicated Touch Contact workflow passed both x64 and Win32 2C.1C self-tests, the accepted Phase 2A surface regression, the Phase 1C calibration/Q regression, runtime banner/safety telemetry checks, and artifact packaging.
 
 Synthetic CI only grants permission for a new physical smoke. PR #10 must remain Draft / non-merged until the real Touch+ produces reliable DOWN/HELD/UP without false semantic contact.
