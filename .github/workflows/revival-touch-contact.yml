@@ -32,6 +32,12 @@ jobs:
           & "build/contact-x64/Release/touchplus_touch_contact_selftest.exe"
           if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1C touch/contact x64 self-test failed: $LASTEXITCODE" }
 
+      - name: Run Phase 2C.1C.1 deferred handoff self-test x64
+        shell: pwsh
+        run: |
+          & "build/contact-x64/Release/touchplus_touch_contact_handoff_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1C.1 deferred handoff x64 self-test failed: $LASTEXITCODE" }
+
   contact-win32-runtime:
     runs-on: windows-latest
     steps:
@@ -49,6 +55,12 @@ jobs:
         run: |
           & "build/contact-x86/Release/touchplus_touch_contact_selftest.exe"
           if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1C touch/contact Win32 self-test failed: $LASTEXITCODE" }
+
+      - name: Run Phase 2C.1C.1 deferred handoff self-test Win32
+        shell: pwsh
+        run: |
+          & "build/contact-x86/Release/touchplus_touch_contact_handoff_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1C.1 deferred handoff Win32 self-test failed: $LASTEXITCODE" }
 
       - name: Configure accepted Revival Win32 regressions
         run: cmake -S revival -B build/revival-x86 -A Win32
@@ -71,27 +83,36 @@ jobs:
           & $exe --self-test $cal
           if ($LASTEXITCODE -ne 0) { throw "Phase 1C depth self-test regressed: $LASTEXITCODE" }
 
-      - name: Verify Phase 2C.1C semantic runtime is compiled in
+      - name: Verify Phase 2C.1C.1 semantic runtime is compiled in
         shell: pwsh
         run: |
           $exe = "build/contact-x86/Release/touchplus_phase2c_tracker.exe"
           if (-not (Test-Path $exe)) { throw "touchplus_phase2c_tracker.exe was not produced" }
           $bytes = [System.IO.File]::ReadAllBytes($exe)
           $text = [System.Text.Encoding]::ASCII.GetString($bytes)
-          if (-not $text.Contains("PHASE 2C.1C CONTACT OCCLUSION BRIDGE ACTIVE")) {
-            throw "Phase 2C.1C runtime banner missing from Win32 executable"
+          if (-not $text.Contains("PHASE 2C.1C.1 DEFERRED PRECONTACT IDENTITY HANDOFF ACTIVE")) {
+            throw "Phase 2C.1C.1 runtime banner missing from Win32 executable"
           }
           if (-not $text.Contains("OS_INJECTION=DISABLED")) {
-            throw "Phase 2C.1C OS-injection safety banner missing"
+            throw "Phase 2C.1C.1 OS-injection safety banner missing"
           }
           if (-not $text.Contains("raw_identity_id")) {
-            throw "Phase 2C.1C raw identity telemetry missing"
+            throw "Phase 2C raw identity telemetry missing"
+          }
+          if (-not $text.Contains("adapter_contact_identity_id")) {
+            throw "Phase 2C.1C.1 adapter epoch telemetry missing"
           }
           if (-not $text.Contains("contact_identity_id")) {
-            throw "Phase 2C.1C semantic identity telemetry missing"
+            throw "Phase 2C detector identity telemetry missing"
           }
           if (-not $text.Contains("cross-mode-physical-identity-bridge")) {
             throw "Phase 2C.1B cross-mode alias telemetry regressed"
+          }
+          if (-not $text.Contains("deferred-precontact-history-handoff")) {
+            throw "Phase 2C.1C.1 deferred handoff path missing"
+          }
+          if (-not $text.Contains("precontact_history")) {
+            throw "Phase 2C.1C.1 handoff telemetry missing"
           }
           if (-not $text.Contains("contact_bridge")) {
             throw "Phase 2C.1C contact bridge telemetry missing"
@@ -109,11 +130,11 @@ jobs:
             throw "Phase 2C upstream reason telemetry missing"
           }
 
-      - name: Prepare Phase 2C.1C contact occlusion semantic kit
+      - name: Prepare Phase 2C.1C.1 deferred handoff semantic kit
         shell: pwsh
         run: |
           $src = "build/contact-x86/Release"
-          $kit = "build/touchplus-phase2c1c-contact-occlusion-bridge"
+          $kit = "build/touchplus-phase2c1c1-deferred-precontact-handoff"
           New-Item -ItemType Directory -Force -Path $kit | Out-Null
           New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
 
@@ -131,17 +152,18 @@ jobs:
           Copy-Item "revival/tools/start-touchplus-phase2b9c.ps1" "$kit/start-touchplus-phase2b9c.ps1"
 
           Copy-Item "revival/notes/phase2c-touch-contact-detection.md" "$kit/README-2C-touch-semantics-history.md"
-          if (Test-Path "revival/notes/phase2c1c-contact-occlusion-bridge.md") {
-            Copy-Item "revival/notes/phase2c1c-contact-occlusion-bridge.md" "$kit/README-2C1C-contact-occlusion-bridge.md"
+          Copy-Item "revival/notes/phase2c1c-contact-occlusion-bridge.md" "$kit/README-2C1C-contact-occlusion-bridge.md"
+          if (Test-Path "revival/notes/phase2c1c1-deferred-precontact-identity-handoff.md") {
+            Copy-Item "revival/notes/phase2c1c1-deferred-precontact-identity-handoff.md" "$kit/README-2C1C1-deferred-precontact-handoff.md"
           }
           Copy-Item "revival/notes/phase2b9c2-physical-smoke-2026-08-20.md" "$kit/README-2B9C2-accepted-fingertip.md"
 
           Get-ChildItem -Recurse $kit | Select-Object FullName,Length | Format-Table -AutoSize
 
-      - name: Upload Phase 2C.1C contact occlusion semantic kit
+      - name: Upload Phase 2C.1C.1 deferred handoff semantic kit
         uses: actions/upload-artifact@v4
         with:
-          name: touchplus-phase2c1c-contact-occlusion-bridge-windows
-          path: build/touchplus-phase2c1c-contact-occlusion-bridge/**
+          name: touchplus-phase2c1c1-deferred-precontact-handoff-windows
+          path: build/touchplus-phase2c1c1-deferred-precontact-handoff/**
           if-no-files-found: error
           retention-days: 30
