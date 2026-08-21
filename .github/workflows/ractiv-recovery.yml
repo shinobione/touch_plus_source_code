@@ -11,24 +11,26 @@ on:
 
 jobs:
   source-gates:
-    name: Integrated July + LOG_ONLY safety gates
+    name: Integrated July + minimal LOG_ONLY safety gates
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Verify historical wiring and recovery patch safety
+      - name: Verify historical wiring and recovery target safety
         run: python ractiv_recovery/source_gate.py
 
       - name: Upload source-gate report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ractiv-recovery-source-gate-report
           path: ractiv_recovery/source-gate-report.json
+          if-no-files-found: warn
 
-  build-archaeology:
-    name: VS2022 compatibility build probe
+  minimal-log-only-build:
+    name: Minimal Ractiv vision core — Win32 LOG_ONLY
     runs-on: windows-latest
     needs: source-gates
     steps:
@@ -36,33 +38,82 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Configure MSBuild
+      - name: Configure MSBuild environment
         uses: microsoft/setup-msbuild@v2
 
-      - name: Run non-blocking historical build probe
+      - name: Build isolated Win32 LOG_ONLY target
         shell: pwsh
-        run: ./ractiv_recovery/build_probe.ps1
+        run: ./ractiv_recovery/build_minimal_log_only.ps1
 
-      - name: Package LOG_ONLY runtime if compile succeeded
+      - name: Package injection-free runtime when compiled
         shell: pwsh
-        run: ./ractiv_recovery/package_log_only.ps1
+        run: ./ractiv_recovery/package_minimal_log_only.ps1
 
-      - name: Upload exact build evidence
+      - name: Upload exact minimal-build evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ractiv-recovery-build-probe
+          name: ractiv-recovery-minimal-build-evidence
+          path: |
+            ractiv_recovery/minimal-build.log
+            ractiv_recovery/minimal-build-status.json
+          if-no-files-found: warn
+
+      - name: Upload safe minimal LOG_ONLY runtime
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchplus-ractiv-recovery-minimal-log-only-windows-x86
+          path: |
+            ractiv_recovery/out-minimal/touchplus-ractiv-log-only-windows-x86.zip
+            ractiv_recovery/out-minimal/package-manifest.json
+          if-no-files-found: ignore
+
+      - name: Require reproducible minimal build and safety package
+        shell: pwsh
+        run: |
+          $statusPath = "ractiv_recovery/minimal-build-status.json"
+          if (!(Test-Path $statusPath)) { throw "minimal-build-status.json missing" }
+          $status = Get-Content $statusPath -Raw | ConvertFrom-Json
+          if (-not $status.compile_succeeded) {
+            Write-Host "Minimal build failed. Evidence artifact contains the exact compiler/linker blocker."
+            exit 1
+          }
+          if (!(Test-Path "ractiv_recovery/out-minimal/touchplus-ractiv-log-only-windows-x86.zip")) {
+            throw "Minimal build compiled but safe package was not produced"
+          }
+          if (!(Test-Path "ractiv_recovery/out-minimal/package-manifest.json")) {
+            throw "Package safety manifest missing"
+          }
+          $manifest = Get-Content "ractiv_recovery/out-minimal/package-manifest.json" -Raw | ConvertFrom-Json
+          if ($manifest.os_injection -ne "DISABLED") { throw "OS injection safety manifest failed" }
+          if ($manifest.pointer_mapper_compiled) { throw "PointerMapper must not be compiled in R0/R1" }
+          if ($manifest.ipc_compiled -or $manifest.udp_compiled) { throw "IPC/UDP must not be compiled in R0/R1" }
+          Write-Host "RACTIV RECOVERY MINIMAL LOG_ONLY BUILD: PASS"
+
+  full-product-archaeology:
+    name: Historical full-project archaeology (non-blocking)
+    runs-on: windows-latest
+    needs: source-gates
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure MSBuild environment
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Probe patched historical full project
+        shell: pwsh
+        run: ./ractiv_recovery/build_probe.ps1
+
+      - name: Upload full-project archaeology evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ractiv-recovery-full-project-archaeology
           path: |
             ractiv_recovery/build-probe.log
             ractiv_recovery/build-probe-status.json
           if-no-files-found: warn
-
-      - name: Upload safe LOG_ONLY runtime
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: touchplus-ractiv-recovery-log-only-windows-x86
-          path: |
-            ractiv_recovery/out/touchplus-ractiv-log-only-windows-x86.zip
-            ractiv_recovery/out/package-manifest.json
-          if-no-files-found: ignore
