@@ -38,11 +38,14 @@ namespace
     Mat g_latest_frame;
     atomic<bool> g_frame_ready(false);
     atomic<bool> g_running(true);
+    atomic<unsigned long long> g_callback_frames(0);
 
     void on_frame(Mat& image_in)
     {
         if (image_in.empty())
             return;
+
+        g_callback_frames.fetch_add(1, memory_order_relaxed);
 
         lock_guard<mutex> lock(g_frame_mutex);
         image_in.copyTo(g_latest_frame);
@@ -158,19 +161,47 @@ int main()
     unsigned long long mono_passes = 0;
     unsigned long long opencv_exceptions = 0;
 
+    string last_stage = "WAITING_FOR_FRAME";
     auto report_start = chrono::steady_clock::now();
     unsigned long long report_frames = 0;
+    unsigned long long last_report_callbacks = g_callback_frames.load(memory_order_relaxed);
 
     while (g_running.load())
     {
+        // Diagnostic heartbeat is intentionally independent of pipeline success.
+        // This distinguishes camera callback starvation from early-stage rejection.
+        const auto heartbeat_now = chrono::steady_clock::now();
+        const double heartbeat_seconds = chrono::duration<double>(heartbeat_now - report_start).count();
+        if (heartbeat_seconds >= 2.0)
+        {
+            const unsigned long long callbacks_now = g_callback_frames.load(memory_order_relaxed);
+            const unsigned long long callback_delta = callbacks_now - last_report_callbacks;
+            const double callback_fps = callback_delta / heartbeat_seconds;
+            const double processed_fps = report_frames / heartbeat_seconds;
+
+            cout << "[RACTIV_RECOVERY] heartbeat"
+                 << " callback_fps=" << callback_fps
+                 << " processed_fps=" << processed_fps
+                 << " callbacks=" << callbacks_now
+                 << " frames=" << frame_num
+                 << " frame_ready=" << (g_frame_ready.load(memory_order_acquire) ? 1 : 0)
+                 << " last_stage=" << last_stage
+                 << " motion_pass=" << motion_passes
+                 << " foreground_pass=" << foreground_passes
+                 << " hand_pass=" << hand_passes
+                 << " mono_pass=" << mono_passes
+                 << " opencv_exceptions=" << opencv_exceptions
+                 << " OS_INJECTION=DISABLED" << endl;
+
+            report_start = heartbeat_now;
+            report_frames = 0;
+            last_report_callbacks = callbacks_now;
+        }
+
         Mat frame;
         {
             lock_guard<mutex> lock(g_frame_mutex);
-            if (!g_frame_ready.load(memory_order_acquire))
-            {
-                // no new frame since last iteration
-            }
-            else
+            if (g_frame_ready.load(memory_order_acquire))
             {
                 g_latest_frame.copyTo(frame);
                 g_frame_ready.store(false, memory_order_release);
@@ -179,6 +210,7 @@ int main()
 
         if (frame.empty())
         {
+            last_stage = "WAITING_FOR_FRAME";
             this_thread::sleep_for(chrono::milliseconds(1));
             continue;
         }
@@ -188,6 +220,7 @@ int main()
 
         if (frame.cols != 1280 || frame.rows != 480)
         {
+            last_stage = "STEREO_SHAPE_REJECT";
             ++stereo_shape_failures;
             if ((stereo_shape_failures % 30) == 1)
                 cerr << "[RACTIV_RECOVERY] WARN: unexpected frame shape " << frame.cols << "x" << frame.rows << endl;
@@ -199,6 +232,7 @@ int main()
         try
         {
             stage = "PREPROCESS_FLIP";
+            last_stage = stage;
             Mat flipped;
             flip(frame, flipped, 0); // exact historical vertical flip
 
@@ -206,53 +240,76 @@ int main()
             Mat image1 = flipped(Rect(640, 0, 640, 480));
 
             stage = "PREPROCESS_RESIZE";
+            last_stage = stage;
             Mat small0;
             Mat small1;
             resize(image0, small0, Size(160, 120), 0, 0, INTER_LINEAR);
             resize(image1, small1, Size(160, 120), 0, 0, INTER_LINEAR);
 
             stage = "PREPROCESS_CHANNEL_DIFF";
+            last_stage = stage;
             Mat prep0;
             Mat prep1;
             compute_channel_diff_image(small0, prep0, normalized_preprocess, "recovery0");
             compute_channel_diff_image(small1, prep1, normalized_preprocess, "recovery1");
 
             stage = "PREPROCESS_BLUR";
+            last_stage = stage;
             Mat smooth0;
             Mat smooth1;
             GaussianBlur(prep0, smooth0, Size(1, 19), 0, 0);
             GaussianBlur(prep1, smooth1, Size(1, 19), 0, 0);
 
             stage = "MOTION_LEFT";
+            last_stage = stage;
             const bool motion_ok0 = motion0.compute(smooth0, "0", false);
             stage = "MOTION_RIGHT";
+            last_stage = stage;
             const bool motion_ok1 = motion1.compute(smooth1, "1", false);
             if (!(motion_ok0 && motion_ok1))
+            {
+                last_stage = "MOTION_REJECT";
                 continue;
+            }
             ++motion_passes;
 
             stage = "FOREGROUND_LEFT";
+            last_stage = stage;
             const bool fg_ok0 = foreground0.compute(prep0, smooth0, motion0, "0", false);
             stage = "FOREGROUND_RIGHT";
+            last_stage = stage;
             const bool fg_ok1 = foreground1.compute(prep1, smooth1, motion1, "1", false);
             if (!(fg_ok0 && fg_ok1))
+            {
+                last_stage = "FOREGROUND_REJECT";
                 continue;
+            }
             ++foreground_passes;
 
             stage = "HAND_LEFT";
+            last_stage = stage;
             const bool hand_ok0 = hand0.compute(foreground0, motion0, "0");
             stage = "HAND_RIGHT";
+            last_stage = stage;
             const bool hand_ok1 = hand1.compute(foreground1, motion1, "1");
             if (!(hand_ok0 && hand_ok1))
+            {
+                last_stage = "HAND_REJECT";
                 continue;
+            }
             ++hand_passes;
 
             stage = "MONO_LEFT";
+            last_stage = stage;
             const bool mono_ok0 = mono0.compute(hand0, "0", false);
             stage = "MONO_RIGHT";
+            last_stage = stage;
             const bool mono_ok1 = mono1.compute(hand1, "1", false);
             if (!(mono_ok0 && mono_ok1))
+            {
+                last_stage = "MONO_REJECT";
                 continue;
+            }
             ++mono_passes;
 
             // Original code estimated pose asynchronously every ~500 ms. For a
@@ -261,10 +318,12 @@ int main()
             if ((frame_num % 15) == 0 && !mono0.points_unwrapped_result.empty())
             {
                 stage = "POSE";
+                last_stage = stage;
                 pose_estimator.compute(mono0.points_unwrapped_result);
             }
 
             stage = "TELEMETRY";
+            last_stage = "MONO_PASS";
             if ((frame_num % 10) == 0)
             {
                 cout << "[RACTIV_RECOVERY] frame=" << frame_num
@@ -280,28 +339,11 @@ int main()
                      << " pose=" << (pose_name.empty() ? "<none>" : pose_name)
                      << " output=LOG_ONLY_2D" << endl;
             }
-
-            const auto now = chrono::steady_clock::now();
-            const double report_seconds = chrono::duration<double>(now - report_start).count();
-            if (report_seconds >= 2.0)
-            {
-                const double fps = report_frames / report_seconds;
-                cout << "[RACTIV_RECOVERY] heartbeat"
-                     << " source_fps=" << fps
-                     << " frames=" << frame_num
-                     << " motion_pass=" << motion_passes
-                     << " foreground_pass=" << foreground_passes
-                     << " hand_pass=" << hand_passes
-                     << " mono_pass=" << mono_passes
-                     << " opencv_exceptions=" << opencv_exceptions
-                     << " OS_INJECTION=DISABLED" << endl;
-                report_start = now;
-                report_frames = 0;
-            }
         }
         catch (const cv::Exception& e)
         {
             ++opencv_exceptions;
+            last_stage = string("EXCEPTION_") + stage;
             cerr << "[RACTIV_RECOVERY] WARN: OpenCV exception"
                  << " frame=" << frame_num
                  << " stage=" << stage
