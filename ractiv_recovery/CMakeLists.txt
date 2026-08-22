@@ -62,10 +62,6 @@ set(RACTIV_MONO_APPROX_REPLACEMENT [=[
         const int recovery_guard_rejects = value_store.get_int("recovery_contour_guard_rejects") + 1;
         value_store.set_int("recovery_contour_guard_rejects", recovery_guard_rejects);
         value_store.set_bool("reset", true);
-        if ((recovery_guard_rejects % 60) == 1)
-            std::cerr << "[RACTIV_RECOVERY] WARN: degenerate mono contour side=" << name
-                      << " points=" << contour_sorted.size()
-                      << " action=DROP_FRAME_CONTINUE" << std::endl;
         return false;
     }
 
@@ -75,10 +71,6 @@ set(RACTIV_MONO_APPROX_REPLACEMENT [=[
         const int recovery_guard_rejects = value_store.get_int("recovery_contour_guard_rejects") + 1;
         value_store.set_int("recovery_contour_guard_rejects", recovery_guard_rejects);
         value_store.set_bool("reset", true);
-        if ((recovery_guard_rejects % 60) == 1)
-            std::cerr << "[RACTIV_RECOVERY] WARN: empty mono approximation side=" << name
-                      << " input_points=" << contour_sorted.size()
-                      << " action=DROP_FRAME_CONTINUE" << std::endl;
         return false;
     }
 ]=])
