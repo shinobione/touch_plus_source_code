@@ -99,8 +99,17 @@ set_target_properties(touchplus_ractiv_log_only PROPERTIES
 # DirectShow fallback. qedit.h is absent from current SDKs, so it still falls
 # through to the bundled DirectShow copy while core Windows headers stay modern.
 if(MSVC)
+    # CMake requires parentheses in environment-variable names to be escaped.
+    # ProgramFiles(x86) is therefore read via ProgramFiles\(x86\), then
+    # normalized before constructing the selected Windows SDK include root.
+    set(RACTIV_PROGRAMFILES_X86 "$ENV{ProgramFiles\(x86\)}")
+    if(RACTIV_PROGRAMFILES_X86 STREQUAL "")
+        message(FATAL_ERROR "ProgramFiles(x86) environment variable is not available")
+    endif()
+    file(TO_CMAKE_PATH "${RACTIV_PROGRAMFILES_X86}" RACTIV_PROGRAMFILES_X86)
+
     set(RACTIV_WINSDK_INCLUDE_ROOT
-        "$ENV{ProgramFiles(x86)}/Windows Kits/10/Include/${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
+        "${RACTIV_PROGRAMFILES_X86}/Windows Kits/10/Include/${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
     if(NOT EXISTS "${RACTIV_WINSDK_INCLUDE_ROOT}/shared/basetsd.h" OR
        NOT EXISTS "${RACTIV_WINSDK_INCLUDE_ROOT}/um/windows.h")
         message(FATAL_ERROR
