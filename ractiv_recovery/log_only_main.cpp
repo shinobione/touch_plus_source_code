@@ -40,6 +40,8 @@ namespace
     atomic<bool> g_running(true);
     atomic<unsigned long long> g_callback_frames(0);
 
+    const char* kDiagnosticWindow = "Touch+ Ractiv Recovery - LEFT | RIGHT";
+
     void on_frame(Mat& image_in)
     {
         if (image_in.empty())
@@ -67,6 +69,91 @@ namespace
         return "(" + to_string(p.x) + "," + to_string(p.y) + ")";
     }
 
+    bool valid_small_point(const Point& p)
+    {
+        return p.x >= 0 && p.y >= 0 && p.x < 160 && p.y < 120;
+    }
+
+    Point small_to_full(const Point& p)
+    {
+        return Point(p.x * 4, p.y * 4);
+    }
+
+    Mat to_bgr(const Mat& image)
+    {
+        if (image.channels() == 3)
+            return image.clone();
+
+        Mat bgr;
+        if (image.channels() == 1)
+            cvtColor(image, bgr, CV_GRAY2BGR);
+        else if (image.channels() == 4)
+            cvtColor(image, bgr, CV_BGRA2BGR);
+        else
+            image.copyTo(bgr);
+        return bgr;
+    }
+
+    void draw_landmark(Mat& image, const Point& small_point, const Scalar& color, const string& label)
+    {
+        if (!valid_small_point(small_point))
+            return;
+
+        const Point p = small_to_full(small_point);
+        circle(image, p, 9, color, 2, CV_AA);
+        line(image, Point(p.x - 12, p.y), Point(p.x + 12, p.y), color, 1, CV_AA);
+        line(image, Point(p.x, p.y - 12), Point(p.x, p.y + 12), color, 1, CV_AA);
+
+        const int text_x = std::max(4, std::min(image.cols - 150, p.x + 12));
+        const int text_y = std::max(18, std::min(image.rows - 6, p.y - 12));
+        putText(image, label + " " + point_text(small_point), Point(text_x, text_y),
+                FONT_HERSHEY_SIMPLEX, 0.45, color, 1, CV_AA);
+    }
+
+    void pump_diagnostic_viewer(
+        const bool enabled,
+        const Mat& left,
+        const Mat& right,
+        const string& stage,
+        const MonoProcessorNew* mono_left,
+        const MonoProcessorNew* mono_right)
+    {
+        if (!enabled || left.empty() || right.empty())
+            return;
+
+        Mat left_view = to_bgr(left);
+        Mat right_view = to_bgr(right);
+
+        putText(left_view, "LEFT", Point(12, 28), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(255, 255, 255), 2, CV_AA);
+        putText(right_view, "RIGHT", Point(12, 28), FONT_HERSHEY_SIMPLEX, 0.8, Scalar(255, 255, 255), 2, CV_AA);
+
+        if (mono_left != NULL && mono_right != NULL)
+        {
+            // Colors are deliberately distinct and identical in both eyes.
+            // PALM = cyan, INDEX = magenta, THUMB = yellow.
+            draw_landmark(left_view, mono_left->pt_palm, Scalar(255, 255, 0), "PALM");
+            draw_landmark(left_view, mono_left->pt_index, Scalar(255, 0, 255), "INDEX");
+            draw_landmark(left_view, mono_left->pt_thumb, Scalar(0, 255, 255), "THUMB");
+
+            draw_landmark(right_view, mono_right->pt_palm, Scalar(255, 255, 0), "PALM");
+            draw_landmark(right_view, mono_right->pt_index, Scalar(255, 0, 255), "INDEX");
+            draw_landmark(right_view, mono_right->pt_thumb, Scalar(0, 255, 255), "THUMB");
+        }
+
+        Mat stereo(left_view.rows, left_view.cols + right_view.cols, CV_8UC3);
+        left_view.copyTo(stereo(Rect(0, 0, left_view.cols, left_view.rows)));
+        right_view.copyTo(stereo(Rect(left_view.cols, 0, right_view.cols, right_view.rows)));
+
+        const string pose_text = pose_name.empty() ? "<none>" : pose_name;
+        putText(stereo, "stage=" + stage + " | pose=" + pose_text + " | Q/ESC quits viewer",
+                Point(12, stereo.rows - 14), FONT_HERSHEY_SIMPLEX, 0.55, Scalar(255, 255, 255), 1, CV_AA);
+
+        imshow(kDiagnosticWindow, stereo);
+        const int key = waitKey(1) & 0xff;
+        if (key == 27 || key == 'q' || key == 'Q')
+            g_running.store(false);
+    }
+
     void init_paths_recovery()
     {
         char buffer[MAX_PATH] = {0};
@@ -86,8 +173,16 @@ namespace
     }
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    bool diagnostic_viewer = false;
+    for (int i = 1; i < argc; ++i)
+    {
+        const string arg = argv[i];
+        if (arg == "--viewer")
+            diagnostic_viewer = true;
+    }
+
     SetConsoleCtrlHandler(console_handler, TRUE);
     init_paths_recovery();
 
@@ -97,7 +192,14 @@ int main()
     cout << " OS_INJECTION=DISABLED" << endl;
     cout << " POINTER_MAPPER=DISABLED" << endl;
     cout << " UDP_CURSOR_OUTPUT=DISABLED" << endl;
+    cout << " DIAGNOSTIC_VIEWER=" << (diagnostic_viewer ? "ENABLED" : "DISABLED") << endl;
     cout << "============================================================" << endl;
+
+    if (diagnostic_viewer)
+    {
+        namedWindow(kDiagnosticWindow, CV_WINDOW_AUTOSIZE);
+        cout << "[RACTIV_RECOVERY] viewer: PALM=cyan INDEX=magenta THUMB=yellow; Q/ESC exits" << endl;
+    }
 
     MotionProcessorNew motion0;
     MotionProcessorNew motion1;
@@ -312,6 +414,7 @@ int main()
             {
                 if (!bootstrap_motion_frame)
                     last_stage = "MOTION_REJECT";
+                pump_diagnostic_viewer(diagnostic_viewer, image0, image1, last_stage, NULL, NULL);
                 continue;
             }
             ++motion_passes;
@@ -326,6 +429,7 @@ int main()
             if (!(fg_ok0 && fg_ok1))
             {
                 last_stage = "FOREGROUND_REJECT";
+                pump_diagnostic_viewer(diagnostic_viewer, image0, image1, last_stage, NULL, NULL);
                 continue;
             }
             ++foreground_passes;
@@ -340,6 +444,7 @@ int main()
             if (!(hand_ok0 && hand_ok1))
             {
                 last_stage = "HAND_REJECT";
+                pump_diagnostic_viewer(diagnostic_viewer, image0, image1, last_stage, NULL, NULL);
                 continue;
             }
             ++hand_passes;
@@ -354,6 +459,7 @@ int main()
             if (!(mono_ok0 && mono_ok1))
             {
                 last_stage = "MONO_REJECT";
+                pump_diagnostic_viewer(diagnostic_viewer, image0, image1, last_stage, NULL, NULL);
                 continue;
             }
             ++mono_passes;
@@ -366,6 +472,8 @@ int main()
                 pose_estimator.compute(mono0.points_unwrapped_result);
                 last_stage = "MONO_PASS";
             }
+
+            pump_diagnostic_viewer(diagnostic_viewer, image0, image1, last_stage, &mono0, &mono1);
 
             if ((frame_num % 10) == 0)
             {
@@ -398,6 +506,9 @@ int main()
             continue;
         }
     }
+
+    if (diagnostic_viewer)
+        destroyWindow(kDiagnosticWindow);
 
     cout << "[RACTIV_RECOVERY] stopped safely; OS input was never enabled" << endl;
     return 0;
