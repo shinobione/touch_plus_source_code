@@ -1,7 +1,7 @@
 // Touch+ Ractiv Recovery - minimal LOG_ONLY entrypoint
 //
-// This file is recovery-only. It intentionally lives outside the historical
-// 2015 source tree so that master remains an auditable snapshot.
+// Recovery-only wrapper around the July 2015 integrated vision lineage.
+// Historical sources remain unchanged/auditable.
 //
 // Boundary: Camera -> MotionProcessorNew -> ForegroundExtractorNew ->
 // HandSplitterNew -> MonoProcessorNew -> PoseEstimator telemetry.
@@ -81,10 +81,7 @@ namespace
         if (!directory_exists(data_path))
             create_directory(data_path);
 
-        // The historical processing code branches on this global.
         mode = "surface";
-
-        // Recovery is console/log only. No OpenCV windows are opened here.
         enable_imshow = false;
     }
 }
@@ -112,9 +109,8 @@ int main()
     MonoProcessorNew mono1;
     PoseEstimator pose_estimator;
 
-    // Intentionally leaked at process exit: the historical Camera destructor
-    // frees legacy buffers incorrectly. Windows will reclaim process memory and
-    // this avoids changing the preserved Camera implementation during R0/R1.
+    // Deliberately leaked at process exit: the historical Camera destructor
+    // contains invalid-free-like legacy behavior. Windows reclaims process memory.
     Camera* camera = new Camera(true, 1280, 480, on_frame);
 
     if (camera->device_not_detected)
@@ -143,16 +139,39 @@ int main()
     if (serial_number.size() != 10 || serial_number.substr(0, 4) != "0101")
         cout << "[RACTIV_RECOVERY] WARN: serial does not match historical 0101xxxxxxxx form" << endl;
 
-    // Keep the recovered historical sensor initializer, but deliberately skip
-    // CameraInitializerNew::adjust_exposure() in this first recovery runtime.
-    // The original adjustment routine contains fragile legacy image indexing;
-    // the fixed 15 ms + preset1 state is already sufficient for hardware smoke.
+    // Keep the recovered fixed sensor initializer, but deliberately skip the
+    // fragile historical CameraInitializerNew::adjust_exposure() routine.
     CameraInitializerNew::init(camera);
     cout << "[RACTIV_RECOVERY] sensor initializer applied: AE/AWB off, LEDs on, exposure=15ms, preset1" << endl;
 
     pose_estimator.init();
 
-    bool normalized_preprocess = true;
+    // The original July main did NOT feed MotionProcessorNew immediately after
+    // camera creation. It repeatedly ran adjust_exposure() first. On the first
+    // frame that finally reached MotionProcessorNew, channel-diff normalization
+    // was still disabled; normalization became active on subsequent frames.
+    //
+    // Our recovery runtime intentionally skips adjust_exposure(), so reproduce
+    // the useful bootstrap semantics safely and deterministically instead:
+    //   1) discard any frame buffered before the fixed sensor init;
+    //   2) allow fresh post-init frames to settle;
+    //   3) seed MotionProcessorNew with one unnormalized frame;
+    //   4) normalize all subsequent frames.
+    {
+        lock_guard<mutex> lock(g_frame_mutex);
+        g_latest_frame.release();
+        g_frame_ready.store(false, memory_order_release);
+    }
+
+    const unsigned int sensor_settle_frames_target = 30;
+    unsigned int sensor_settle_frames_seen = 0;
+    bool normalized_preprocess = false;
+    bool motion_background_seeded = false;
+
+    cout << "[RACTIV_RECOVERY] bootstrap: discarded pre-init buffered frame; "
+         << "settle_frames=" << sensor_settle_frames_target
+         << "; first motion frame normalization=OFF" << endl;
+
     unsigned long long frame_num = 0;
     unsigned long long stereo_shape_failures = 0;
     unsigned long long motion_passes = 0;
@@ -161,15 +180,14 @@ int main()
     unsigned long long mono_passes = 0;
     unsigned long long opencv_exceptions = 0;
 
-    string last_stage = "WAITING_FOR_FRAME";
+    string last_stage = "WAITING_FOR_FRESH_POST_INIT_FRAME";
     auto report_start = chrono::steady_clock::now();
     unsigned long long report_frames = 0;
     unsigned long long last_report_callbacks = g_callback_frames.load(memory_order_relaxed);
 
     while (g_running.load())
     {
-        // Diagnostic heartbeat is intentionally independent of pipeline success.
-        // This distinguishes camera callback starvation from early-stage rejection.
+        // Heartbeat is intentionally independent of pipeline success.
         const auto heartbeat_now = chrono::steady_clock::now();
         const double heartbeat_seconds = chrono::duration<double>(heartbeat_now - report_start).count();
         if (heartbeat_seconds >= 2.0)
@@ -186,6 +204,9 @@ int main()
                  << " frames=" << frame_num
                  << " frame_ready=" << (g_frame_ready.load(memory_order_acquire) ? 1 : 0)
                  << " last_stage=" << last_stage
+                 << " settle=" << sensor_settle_frames_seen << "/" << sensor_settle_frames_target
+                 << " normalized=" << (normalized_preprocess ? 1 : 0)
+                 << " motion_seeded=" << (motion_background_seeded ? 1 : 0)
                  << " motion_pass=" << motion_passes
                  << " foreground_pass=" << foreground_passes
                  << " hand_pass=" << hand_passes
@@ -227,6 +248,15 @@ int main()
             continue;
         }
 
+        if (sensor_settle_frames_seen < sensor_settle_frames_target)
+        {
+            ++sensor_settle_frames_seen;
+            last_stage = "SENSOR_SETTLE";
+            if (sensor_settle_frames_seen == sensor_settle_frames_target)
+                cout << "[RACTIV_RECOVERY] bootstrap: sensor settle complete; next frame seeds motion background with normalization OFF" << endl;
+            continue;
+        }
+
         const char* stage = "PREPROCESS";
 
         try
@@ -260,15 +290,28 @@ int main()
             GaussianBlur(prep0, smooth0, Size(1, 19), 0, 0);
             GaussianBlur(prep1, smooth1, Size(1, 19), 0, 0);
 
+            const bool bootstrap_motion_frame = !motion_background_seeded;
+
             stage = "MOTION_LEFT";
             last_stage = stage;
             const bool motion_ok0 = motion0.compute(smooth0, "0", false);
+
             stage = "MOTION_RIGHT";
             last_stage = stage;
             const bool motion_ok1 = motion1.compute(smooth1, "1", false);
+
+            if (bootstrap_motion_frame)
+            {
+                motion_background_seeded = true;
+                normalized_preprocess = true;
+                last_stage = "MOTION_BACKGROUND_SEEDED";
+                cout << "[RACTIV_RECOVERY] bootstrap: motion background seeded from unnormalized stereo frame; normalization=ON" << endl;
+            }
+
             if (!(motion_ok0 && motion_ok1))
             {
-                last_stage = "MOTION_REJECT";
+                if (!bootstrap_motion_frame)
+                    last_stage = "MOTION_REJECT";
                 continue;
             }
             ++motion_passes;
@@ -276,6 +319,7 @@ int main()
             stage = "FOREGROUND_LEFT";
             last_stage = stage;
             const bool fg_ok0 = foreground0.compute(prep0, smooth0, motion0, "0", false);
+
             stage = "FOREGROUND_RIGHT";
             last_stage = stage;
             const bool fg_ok1 = foreground1.compute(prep1, smooth1, motion1, "1", false);
@@ -289,6 +333,7 @@ int main()
             stage = "HAND_LEFT";
             last_stage = stage;
             const bool hand_ok0 = hand0.compute(foreground0, motion0, "0");
+
             stage = "HAND_RIGHT";
             last_stage = stage;
             const bool hand_ok1 = hand1.compute(foreground1, motion1, "1");
@@ -302,6 +347,7 @@ int main()
             stage = "MONO_LEFT";
             last_stage = stage;
             const bool mono_ok0 = mono0.compute(hand0, "0", false);
+
             stage = "MONO_RIGHT";
             last_stage = stage;
             const bool mono_ok1 = mono1.compute(hand1, "1", false);
@@ -311,19 +357,16 @@ int main()
                 continue;
             }
             ++mono_passes;
+            last_stage = "MONO_PASS";
 
-            // Original code estimated pose asynchronously every ~500 ms. For a
-            // diagnostic runtime, sampling every 15 processed frames is sufficient
-            // and avoids adding another legacy lifetime/thread hazard.
             if ((frame_num % 15) == 0 && !mono0.points_unwrapped_result.empty())
             {
                 stage = "POSE";
                 last_stage = stage;
                 pose_estimator.compute(mono0.points_unwrapped_result);
+                last_stage = "MONO_PASS";
             }
 
-            stage = "TELEMETRY";
-            last_stage = "MONO_PASS";
             if ((frame_num % 10) == 0)
             {
                 cout << "[RACTIV_RECOVERY] frame=" << frame_num
@@ -343,7 +386,7 @@ int main()
         catch (const cv::Exception& e)
         {
             ++opencv_exceptions;
-            last_stage = string("EXCEPTION_") + stage;
+            last_stage = "EXCEPTION_" + string(stage);
             cerr << "[RACTIV_RECOVERY] WARN: OpenCV exception"
                  << " frame=" << frame_num
                  << " stage=" << stage
