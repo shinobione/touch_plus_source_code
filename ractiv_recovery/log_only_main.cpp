@@ -4,7 +4,8 @@
 // Historical sources remain unchanged/auditable.
 //
 // Boundary: Camera -> MotionProcessorNew -> ForegroundExtractorNew ->
-// HandSplitterNew -> MonoProcessorNew -> PoseEstimator telemetry.
+// HandSplitterNew -> MonoProcessorNew -> RecoveryHandResolver -> PoseEstimator
+// telemetry/viewer only.
 //
 // NO PointerMapper, NO win_cursor_plus, NO UDP, NO OS input injection.
 
@@ -13,8 +14,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <iomanip>
 #include <iostream>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -28,6 +31,7 @@
 #include "mono_processor_new.h"
 #include "pose_estimator.h"
 #include "filesystem.h"
+#include "recovery_hand_resolver.h"
 
 using namespace cv;
 using namespace std;
@@ -69,9 +73,24 @@ namespace
         return "(" + to_string(p.x) + "," + to_string(p.y) + ")";
     }
 
+    string point2f_text(const Point2f& p)
+    {
+        if (p.x < 0.0f || p.y < 0.0f)
+            return "(-1,-1)";
+
+        ostringstream ss;
+        ss << fixed << setprecision(1) << "(" << p.x << "," << p.y << ")";
+        return ss.str();
+    }
+
     bool valid_small_point(const Point& p)
     {
         return p.x >= 0 && p.y >= 0 && p.x < 160 && p.y < 120;
+    }
+
+    bool valid_full_point(const Point2f& p, const Mat& image)
+    {
+        return p.x >= 0.0f && p.y >= 0.0f && p.x < image.cols && p.y < image.rows;
     }
 
     Point small_to_full(const Point& p)
@@ -104,10 +123,26 @@ namespace
         line(image, Point(p.x - 12, p.y), Point(p.x + 12, p.y), color, 1, CV_AA);
         line(image, Point(p.x, p.y - 12), Point(p.x, p.y + 12), color, 1, CV_AA);
 
-        const int text_x = std::max(4, std::min(image.cols - 150, p.x + 12));
+        const int text_x = std::max(4, std::min(image.cols - 190, p.x + 12));
         const int text_y = std::max(18, std::min(image.rows - 6, p.y - 12));
         putText(image, label + " " + point_text(small_point), Point(text_x, text_y),
-                FONT_HERSHEY_SIMPLEX, 0.45, color, 1, CV_AA);
+                FONT_HERSHEY_SIMPLEX, 0.42, color, 1, CV_AA);
+    }
+
+    void draw_refined_landmark(Mat& image, const Point2f& refined_point, const Scalar& color, const string& label)
+    {
+        if (!valid_full_point(refined_point, image))
+            return;
+
+        const Point p(cvRound(refined_point.x), cvRound(refined_point.y));
+        line(image, Point(p.x - 11, p.y - 11), Point(p.x + 11, p.y + 11), color, 2, CV_AA);
+        line(image, Point(p.x - 11, p.y + 11), Point(p.x + 11, p.y - 11), color, 2, CV_AA);
+        circle(image, p, 4, color, 1, CV_AA);
+
+        const int text_x = std::max(4, std::min(image.cols - 210, p.x + 12));
+        const int text_y = std::max(18, std::min(image.rows - 6, p.y + 18));
+        putText(image, label + " " + point2f_text(refined_point), Point(text_x, text_y),
+                FONT_HERSHEY_SIMPLEX, 0.42, color, 1, CV_AA);
     }
 
     void pump_diagnostic_viewer(
@@ -116,7 +151,8 @@ namespace
         const Mat& right,
         const string& stage,
         const MonoProcessorNew* mono_left,
-        const MonoProcessorNew* mono_right)
+        const MonoProcessorNew* mono_right,
+        const RecoveryHandResolver* resolver)
     {
         if (!enabled || left.empty() || right.empty())
             return;
@@ -129,15 +165,22 @@ namespace
 
         if (mono_left != NULL && mono_right != NULL)
         {
-            // Colors are deliberately distinct and identical in both eyes.
-            // PALM = cyan, INDEX = magenta, THUMB = yellow.
+            // PALM = cyan, coarse INDEX = magenta, THUMB = yellow.
             draw_landmark(left_view, mono_left->pt_palm, Scalar(255, 255, 0), "PALM");
-            draw_landmark(left_view, mono_left->pt_index, Scalar(255, 0, 255), "INDEX");
+            draw_landmark(left_view, mono_left->pt_index, Scalar(255, 0, 255), "COARSE INDEX");
             draw_landmark(left_view, mono_left->pt_thumb, Scalar(0, 255, 255), "THUMB");
 
             draw_landmark(right_view, mono_right->pt_palm, Scalar(255, 255, 0), "PALM");
-            draw_landmark(right_view, mono_right->pt_index, Scalar(255, 0, 255), "INDEX");
+            draw_landmark(right_view, mono_right->pt_index, Scalar(255, 0, 255), "COARSE INDEX");
             draw_landmark(right_view, mono_right->pt_thumb, Scalar(0, 255, 255), "THUMB");
+        }
+
+        if (resolver != NULL)
+        {
+            // Recovery full-resolution refinement = green X. This is raw-eye
+            // anatomy only; no historical Reprojector or metric stereo is used.
+            draw_refined_landmark(left_view, resolver->pt_precise_index0, Scalar(0, 255, 0), "REFINED INDEX");
+            draw_refined_landmark(right_view, resolver->pt_precise_index1, Scalar(0, 255, 0), "REFINED INDEX");
         }
 
         Mat stereo(left_view.rows, left_view.cols + right_view.cols, CV_8UC3);
@@ -145,8 +188,8 @@ namespace
         right_view.copyTo(stereo(Rect(left_view.cols, 0, right_view.cols, right_view.rows)));
 
         const string pose_text = pose_name.empty() ? "<none>" : pose_name;
-        putText(stereo, "stage=" + stage + " | pose=" + pose_text + " | Q/ESC quits viewer",
-                Point(12, stereo.rows - 14), FONT_HERSHEY_SIMPLEX, 0.55, Scalar(255, 255, 255), 1, CV_AA);
+        putText(stereo, "stage=" + stage + " | pose=" + pose_text + " | magenta=coarse green=refined | Q/ESC quits",
+                Point(12, stereo.rows - 14), FONT_HERSHEY_SIMPLEX, 0.52, Scalar(255, 255, 255), 1, CV_AA);
 
         imshow(kDiagnosticWindow, stereo);
         const int key = waitKey(1) & 0xff;
@@ -187,18 +230,20 @@ int main(int argc, char** argv)
     init_paths_recovery();
 
     cout << "============================================================" << endl;
-    cout << " Touch+ Ractiv Recovery - R0/R1 LOG_ONLY" << endl;
+    cout << " Touch+ Ractiv Recovery - R1 RAW-EYE HANDRESOLVER DIAGNOSTIC" << endl;
     cout << " historical algorithm lineage: July 2015 integrated core" << endl;
     cout << " OS_INJECTION=DISABLED" << endl;
     cout << " POINTER_MAPPER=DISABLED" << endl;
     cout << " UDP_CURSOR_OUTPUT=DISABLED" << endl;
+    cout << " HISTORICAL_REPROJECTOR=DISABLED" << endl;
+    cout << " RAW_EYE_INDEX_REFINER=" << (diagnostic_viewer ? "ENABLED" : "DISABLED") << endl;
     cout << " DIAGNOSTIC_VIEWER=" << (diagnostic_viewer ? "ENABLED" : "DISABLED") << endl;
     cout << "============================================================" << endl;
 
     if (diagnostic_viewer)
     {
         namedWindow(kDiagnosticWindow, CV_WINDOW_AUTOSIZE);
-        cout << "[RACTIV_RECOVERY] viewer: PALM=cyan INDEX=magenta THUMB=yellow; Q/ESC exits" << endl;
+        cout << "[RACTIV_RECOVERY] viewer: PALM=cyan COARSE_INDEX=magenta REFINED_INDEX=green THUMB=yellow; Q/ESC exits" << endl;
     }
 
     MotionProcessorNew motion0;
@@ -209,6 +254,7 @@ int main(int argc, char** argv)
     HandSplitterNew hand1;
     MonoProcessorNew mono0;
     MonoProcessorNew mono1;
+    RecoveryHandResolver recovery_hand_resolver;
     PoseEstimator pose_estimator;
 
     // Deliberately leaked at process exit: the historical Camera destructor
@@ -280,6 +326,8 @@ int main(int argc, char** argv)
     unsigned long long foreground_passes = 0;
     unsigned long long hand_passes = 0;
     unsigned long long mono_passes = 0;
+    unsigned long long refinement_attempts = 0;
+    unsigned long long refinement_pairs = 0;
     unsigned long long opencv_exceptions = 0;
 
     string last_stage = "WAITING_FOR_FRESH_POST_INIT_FRAME";
@@ -313,6 +361,8 @@ int main(int argc, char** argv)
                  << " foreground_pass=" << foreground_passes
                  << " hand_pass=" << hand_passes
                  << " mono_pass=" << mono_passes
+                 << " refine_attempts=" << refinement_attempts
+                 << " refined_pairs=" << refinement_pairs
                  << " opencv_exceptions=" << opencv_exceptions
                  << " OS_INJECTION=DISABLED" << endl;
 
@@ -414,7 +464,7 @@ int main(int argc, char** argv)
             {
                 if (!bootstrap_motion_frame)
                     last_stage = "MOTION_REJECT";
-                pump_diagnostic_viewer(diagnostic_viewer, image0, image1, last_stage, NULL, NULL);
+                pump_diagnostic_viewer(diagnostic_viewer, image0, image1, last_stage, NULL, NULL, NULL);
                 continue;
             }
             ++motion_passes;
@@ -429,7 +479,7 @@ int main(int argc, char** argv)
             if (!(fg_ok0 && fg_ok1))
             {
                 last_stage = "FOREGROUND_REJECT";
-                pump_diagnostic_viewer(diagnostic_viewer, image0, image1, last_stage, NULL, NULL);
+                pump_diagnostic_viewer(diagnostic_viewer, image0, image1, last_stage, NULL, NULL, NULL);
                 continue;
             }
             ++foreground_passes;
@@ -444,7 +494,7 @@ int main(int argc, char** argv)
             if (!(hand_ok0 && hand_ok1))
             {
                 last_stage = "HAND_REJECT";
-                pump_diagnostic_viewer(diagnostic_viewer, image0, image1, last_stage, NULL, NULL);
+                pump_diagnostic_viewer(diagnostic_viewer, image0, image1, last_stage, NULL, NULL, NULL);
                 continue;
             }
             ++hand_passes;
@@ -459,11 +509,26 @@ int main(int argc, char** argv)
             if (!(mono_ok0 && mono_ok1))
             {
                 last_stage = "MONO_REJECT";
-                pump_diagnostic_viewer(diagnostic_viewer, image0, image1, last_stage, NULL, NULL);
+                pump_diagnostic_viewer(diagnostic_viewer, image0, image1, last_stage, NULL, NULL, NULL);
                 continue;
             }
             ++mono_passes;
             last_stage = "MONO_PASS";
+
+            if (diagnostic_viewer)
+            {
+                const bool coarse_pair = valid_small_point(mono0.pt_index) && valid_small_point(mono1.pt_index);
+                if (coarse_pair)
+                    ++refinement_attempts;
+
+                stage = "REFINE_INDEX_RAW_EYES";
+                last_stage = stage;
+                recovery_hand_resolver.compute(mono0, mono1, motion0, motion1, image0, image1);
+                if (recovery_hand_resolver.pair_valid)
+                    ++refinement_pairs;
+
+                last_stage = "MONO_PASS";
+            }
 
             if ((frame_num % 15) == 0 && !mono0.points_unwrapped_result.empty())
             {
@@ -473,7 +538,14 @@ int main(int argc, char** argv)
                 last_stage = "MONO_PASS";
             }
 
-            pump_diagnostic_viewer(diagnostic_viewer, image0, image1, last_stage, &mono0, &mono1);
+            pump_diagnostic_viewer(
+                diagnostic_viewer,
+                image0,
+                image1,
+                last_stage,
+                &mono0,
+                &mono1,
+                diagnostic_viewer ? &recovery_hand_resolver : NULL);
 
             if ((frame_num % 10) == 0)
             {
@@ -484,9 +556,14 @@ int main(int argc, char** argv)
                      << " left_points=" << mono0.points_unwrapped_result.size()
                      << " right_points=" << mono1.points_unwrapped_result.size()
                      << " left_palm=" << point_text(mono0.pt_palm)
-                     << " left_index=" << point_text(mono0.pt_index)
+                     << " left_index_coarse=" << point_text(mono0.pt_index)
+                     << " left_index_refined=" << point2f_text(recovery_hand_resolver.pt_precise_index0)
+                     << " left_refine_shift_px=" << recovery_hand_resolver.shift_index0_px
                      << " left_thumb=" << point_text(mono0.pt_thumb)
-                     << " right_index=" << point_text(mono1.pt_index)
+                     << " right_index_coarse=" << point_text(mono1.pt_index)
+                     << " right_index_refined=" << point2f_text(recovery_hand_resolver.pt_precise_index1)
+                     << " right_refine_shift_px=" << recovery_hand_resolver.shift_index1_px
+                     << " refined_pair=" << (recovery_hand_resolver.pair_valid ? 1 : 0)
                      << " pose=" << (pose_name.empty() ? "<none>" : pose_name)
                      << " output=LOG_ONLY_2D" << endl;
             }
