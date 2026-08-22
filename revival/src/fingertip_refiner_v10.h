@@ -160,13 +160,15 @@ inline DistalRefineResultV10 refine_distal_tip_v10(
     double axis_y = anatomy_axis_dy;
     double axis_norm = std::hypot(axis_x, axis_y);
     if (!std::isfinite(axis_norm) || axis_norm < 0.50) {
+        // Anatomy axes are normally unit vectors. Only the palm->coarse
+        // fallback is measured in pixels and therefore needs a minimum length.
         axis_x = static_cast<double>(coarse_x) - palm_x;
         axis_y = static_cast<double>(coarse_y) - palm_y;
         axis_norm = std::hypot(axis_x, axis_y);
-    }
-    if (!std::isfinite(axis_norm) || axis_norm < 8.0) {
-        out.status = DistalRefineStatusV10::AxisInvalid;
-        return out;
+        if (!std::isfinite(axis_norm) || axis_norm < 8.0) {
+            out.status = DistalRefineStatusV10::AxisInvalid;
+            return out;
+        }
     }
     axis_x /= axis_norm;
     axis_y /= axis_norm;
