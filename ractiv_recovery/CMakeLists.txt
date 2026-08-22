@@ -55,31 +55,33 @@ set(RACTIV_MONO_RECOVERY "${RACTIV_GENERATED_DIR}/mono_processor_new_recovery.cp
 file(MAKE_DIRECTORY "${RACTIV_GENERATED_DIR}")
 file(READ "${RACTIV_MONO_ORIGINAL}" RACTIV_MONO_SOURCE)
 
-set(RACTIV_MONO_APPROX_NEEDLE [=[	approxPolyDP(Mat(contour_sorted), contour_approximated, 2, true);]=])
-set(RACTIV_MONO_APPROX_REPLACEMENT [=[	if (contour_sorted.size() < 3)
-	{
-		const int recovery_guard_rejects = value_store.get_int("recovery_contour_guard_rejects") + 1;
-		value_store.set_int("recovery_contour_guard_rejects", recovery_guard_rejects);
-		value_store.set_bool("reset", true);
-		if ((recovery_guard_rejects % 60) == 1)
-			std::cerr << "[RACTIV_RECOVERY] WARN: degenerate mono contour side=" << name
-					  << " points=" << contour_sorted.size()
-					  << " action=DROP_FRAME_CONTINUE" << std::endl;
-		return false;
-	}
+set(RACTIV_MONO_APPROX_NEEDLE "approxPolyDP(Mat(contour_sorted), contour_approximated, 2, true);")
+set(RACTIV_MONO_APPROX_REPLACEMENT [=[
+    if (contour_sorted.size() < 3)
+    {
+        const int recovery_guard_rejects = value_store.get_int("recovery_contour_guard_rejects") + 1;
+        value_store.set_int("recovery_contour_guard_rejects", recovery_guard_rejects);
+        value_store.set_bool("reset", true);
+        if ((recovery_guard_rejects % 60) == 1)
+            std::cerr << "[RACTIV_RECOVERY] WARN: degenerate mono contour side=" << name
+                      << " points=" << contour_sorted.size()
+                      << " action=DROP_FRAME_CONTINUE" << std::endl;
+        return false;
+    }
 
-	approxPolyDP(contour_sorted, contour_approximated, 2, true);
-	if (contour_approximated.empty())
-	{
-		const int recovery_guard_rejects = value_store.get_int("recovery_contour_guard_rejects") + 1;
-		value_store.set_int("recovery_contour_guard_rejects", recovery_guard_rejects);
-		value_store.set_bool("reset", true);
-		if ((recovery_guard_rejects % 60) == 1)
-			std::cerr << "[RACTIV_RECOVERY] WARN: empty mono approximation side=" << name
-					  << " input_points=" << contour_sorted.size()
-					  << " action=DROP_FRAME_CONTINUE" << std::endl;
-		return false;
-	}]=])
+    approxPolyDP(contour_sorted, contour_approximated, 2, true);
+    if (contour_approximated.empty())
+    {
+        const int recovery_guard_rejects = value_store.get_int("recovery_contour_guard_rejects") + 1;
+        value_store.set_int("recovery_contour_guard_rejects", recovery_guard_rejects);
+        value_store.set_bool("reset", true);
+        if ((recovery_guard_rejects % 60) == 1)
+            std::cerr << "[RACTIV_RECOVERY] WARN: empty mono approximation side=" << name
+                      << " input_points=" << contour_sorted.size()
+                      << " action=DROP_FRAME_CONTINUE" << std::endl;
+        return false;
+    }
+]=])
 
 string(FIND "${RACTIV_MONO_SOURCE}" "${RACTIV_MONO_APPROX_NEEDLE}" RACTIV_MONO_APPROX_POS)
 if(RACTIV_MONO_APPROX_POS EQUAL -1)
