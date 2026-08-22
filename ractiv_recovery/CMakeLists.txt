@@ -44,6 +44,55 @@ set(ETRON "${DEPS}/Etron")
 set(TURBOJPEG "${DEPS}/TurboJPEG")
 set(DIRECTSHOW "${DEPS}/DirectShow")
 
+# Keep the July historical source itself untouched. For the isolated LOG_ONLY
+# target only, generate a recovery copy of MonoProcessorNew with a narrow guard
+# around its old OpenCV 2.4 approxPolyDP call. Physical smoke showed that a
+# degenerate hand contour can otherwise reach cvPointSeqFromMat and throw on
+# every subsequent frame. The generated copy drops only that bad frame.
+set(RACTIV_MONO_ORIGINAL "${CORE}/mono_processor_new.cpp")
+set(RACTIV_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
+set(RACTIV_MONO_RECOVERY "${RACTIV_GENERATED_DIR}/mono_processor_new_recovery.cpp")
+file(MAKE_DIRECTORY "${RACTIV_GENERATED_DIR}")
+file(READ "${RACTIV_MONO_ORIGINAL}" RACTIV_MONO_SOURCE)
+
+set(RACTIV_MONO_APPROX_NEEDLE [=[	approxPolyDP(Mat(contour_sorted), contour_approximated, 2, true);]=])
+set(RACTIV_MONO_APPROX_REPLACEMENT [=[	if (contour_sorted.size() < 3)
+	{
+		const int recovery_guard_rejects = value_store.get_int("recovery_contour_guard_rejects") + 1;
+		value_store.set_int("recovery_contour_guard_rejects", recovery_guard_rejects);
+		value_store.set_bool("reset", true);
+		if ((recovery_guard_rejects % 60) == 1)
+			std::cerr << "[RACTIV_RECOVERY] WARN: degenerate mono contour side=" << name
+					  << " points=" << contour_sorted.size()
+					  << " action=DROP_FRAME_CONTINUE" << std::endl;
+		return false;
+	}
+
+	approxPolyDP(contour_sorted, contour_approximated, 2, true);
+	if (contour_approximated.empty())
+	{
+		const int recovery_guard_rejects = value_store.get_int("recovery_contour_guard_rejects") + 1;
+		value_store.set_int("recovery_contour_guard_rejects", recovery_guard_rejects);
+		value_store.set_bool("reset", true);
+		if ((recovery_guard_rejects % 60) == 1)
+			std::cerr << "[RACTIV_RECOVERY] WARN: empty mono approximation side=" << name
+					  << " input_points=" << contour_sorted.size()
+					  << " action=DROP_FRAME_CONTINUE" << std::endl;
+		return false;
+	}]=])
+
+string(FIND "${RACTIV_MONO_SOURCE}" "${RACTIV_MONO_APPROX_NEEDLE}" RACTIV_MONO_APPROX_POS)
+if(RACTIV_MONO_APPROX_POS EQUAL -1)
+    message(FATAL_ERROR
+        "Recovery mono guard could not find the expected July approxPolyDP call; refusing an unverified source transform")
+endif()
+string(REPLACE
+    "${RACTIV_MONO_APPROX_NEEDLE}"
+    "${RACTIV_MONO_APPROX_REPLACEMENT}"
+    RACTIV_MONO_SOURCE
+    "${RACTIV_MONO_SOURCE}")
+file(WRITE "${RACTIV_MONO_RECOVERY}" "${RACTIV_MONO_SOURCE}")
+
 # This is intentionally NOT the historical product target. It compiles the
 # smallest practical source closure for the first July-vision hardware smoke.
 # Explicitly excluded: historical main.cpp, IPC, UDP, Reprojector,
@@ -64,7 +113,7 @@ set(RACTIV_RECOVERY_SOURCES
     "${CORE}/contour_functions.cpp"
     "${CORE}/foreground_extractor_new.cpp"
     "${CORE}/hand_splitter_new.cpp"
-    "${CORE}/mono_processor_new.cpp"
+    "${RACTIV_MONO_RECOVERY}"
     "${CORE}/motion_processor_new.cpp"
     "${CORE}/pose_estimator.cpp"
 
@@ -194,4 +243,5 @@ target_link_libraries(touchplus_ractiv_log_only PRIVATE
 
 message(STATUS "Touch+ Ractiv Recovery target: minimal LOG_ONLY Win32")
 message(STATUS "Historical core: ${CORE}")
+message(STATUS "Recovery MonoProcessor source: ${RACTIV_MONO_RECOVERY}")
 message(STATUS "OS input / PointerMapper / Reprojector / IPC / UDP: excluded")
