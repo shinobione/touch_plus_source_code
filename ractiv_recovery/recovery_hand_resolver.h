@@ -1,6 +1,7 @@
 #pragma once
 
 #include <opencv2/opencv.hpp>
+#include <string>
 
 #include "blob_detector_new.h"
 #include "mono_processor_new.h"
@@ -51,5 +52,6 @@ private:
         const cv::Mat& image_background_in,
         unsigned char diff_threshold,
         unsigned char gray_threshold,
-        BlobDetectorNew& blob_detector);
+        BlobDetectorNew& blob_detector,
+        const std::string& normalization_key);
 };
