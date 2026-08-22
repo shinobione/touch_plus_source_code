@@ -16,18 +16,42 @@
 // historical coarse pt_index become a visibly better distal fingertip when the
 // original local background-subtraction idea is applied at full resolution?
 //
+// A recovery-only plausibility gate now separates the raw local-refinement
+// candidate from an accepted fingertip. The gate uses only raw-eye anatomy:
+// coarse-index distance, palm->index direction, distal progress, lateral drift,
+// and agreement between LEFT/RIGHT refinement deltas. It does NOT perform
+// stereo depth or any output mapping.
+//
 // No stereo depth, pointer mapping, contact semantics, IPC, UDP or OS output is
 // performed here.
 class RecoveryHandResolver
 {
 public:
+    // Raw local 50x20 refinement candidates. These are diagnostic only and may
+    // be rejected by the coherence gate.
+    cv::Point2f pt_candidate_index0 = cv::Point2f(-1.0f, -1.0f);
+    cv::Point2f pt_candidate_index1 = cv::Point2f(-1.0f, -1.0f);
+
+    // Accepted refined pair. These stay invalid unless BOTH eyes pass their
+    // anatomy gate and the pair passes LEFT/RIGHT coherence.
     cv::Point2f pt_precise_index0 = cv::Point2f(-1.0f, -1.0f);
     cv::Point2f pt_precise_index1 = cv::Point2f(-1.0f, -1.0f);
 
     float shift_index0_px = -1.0f;
     float shift_index1_px = -1.0f;
+    float forward_index0_px = 0.0f;
+    float forward_index1_px = 0.0f;
+    float lateral_index0_px = 0.0f;
+    float lateral_index1_px = 0.0f;
+    float radial_delta_index0_px = 0.0f;
+    float radial_delta_index1_px = 0.0f;
+    float direction_cos_index0 = -2.0f;
+    float direction_cos_index1 = -2.0f;
 
+    bool eye0_valid = false;
+    bool eye1_valid = false;
     bool pair_valid = false;
+    std::string gate_reason = "NOT_RUN";
 
     void compute(
         MonoProcessorNew& mono_processor0,
