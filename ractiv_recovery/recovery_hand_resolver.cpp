@@ -45,7 +45,8 @@ void RecoveryHandResolver::compute(
             motion_processor0.image_background_static,
             motion_processor0.diff_threshold,
             motion_processor0.gray_threshold,
-            blob_detector0);
+            blob_detector0,
+            "recovery_hand_resolver_left");
     }
 
     if (valid_coarse_index(mono_processor1.pt_index))
@@ -56,7 +57,8 @@ void RecoveryHandResolver::compute(
             motion_processor1.image_background_static,
             motion_processor1.diff_threshold,
             motion_processor1.gray_threshold,
-            blob_detector1);
+            blob_detector1,
+            "recovery_hand_resolver_right");
     }
 
     if (pt_precise_index0.x >= 0.0f)
@@ -87,7 +89,8 @@ Point2f RecoveryHandResolver::increase_resolution_raw(
     const Mat& image_background_in,
     unsigned char diff_threshold,
     unsigned char gray_threshold,
-    BlobDetectorNew& blob_detector)
+    BlobDetectorNew& blob_detector,
+    const std::string& normalization_key)
 {
     if (image_in.empty() || image_background_in.empty())
         return Point2f(-1.0f, -1.0f);
@@ -114,7 +117,7 @@ Point2f RecoveryHandResolver::increase_resolution_raw(
         image_cropped,
         image_cropped_preprocessed,
         true,
-        "recovery_hand_resolver");
+        normalization_key);
 
     if (image_cropped_preprocessed.empty())
         return Point2f(-1.0f, -1.0f);
