@@ -156,6 +156,7 @@ int main()
     unsigned long long foreground_passes = 0;
     unsigned long long hand_passes = 0;
     unsigned long long mono_passes = 0;
+    unsigned long long opencv_exceptions = 0;
 
     auto report_start = chrono::steady_clock::now();
     unsigned long long report_frames = 0;
@@ -193,88 +194,123 @@ int main()
             continue;
         }
 
-        Mat flipped;
-        flip(frame, flipped, 0); // exact historical vertical flip
+        const char* stage = "PREPROCESS";
 
-        Mat image0 = flipped(Rect(0, 0, 640, 480));
-        Mat image1 = flipped(Rect(640, 0, 640, 480));
-
-        Mat small0;
-        Mat small1;
-        resize(image0, small0, Size(160, 120), 0, 0, INTER_LINEAR);
-        resize(image1, small1, Size(160, 120), 0, 0, INTER_LINEAR);
-
-        Mat prep0;
-        Mat prep1;
-        compute_channel_diff_image(small0, prep0, normalized_preprocess, "recovery0");
-        compute_channel_diff_image(small1, prep1, normalized_preprocess, "recovery1");
-
-        Mat smooth0;
-        Mat smooth1;
-        GaussianBlur(prep0, smooth0, Size(1, 19), 0, 0);
-        GaussianBlur(prep1, smooth1, Size(1, 19), 0, 0);
-
-        const bool motion_ok0 = motion0.compute(smooth0, "0", false);
-        const bool motion_ok1 = motion1.compute(smooth1, "1", false);
-        if (!(motion_ok0 && motion_ok1))
-            continue;
-        ++motion_passes;
-
-        const bool fg_ok0 = foreground0.compute(prep0, smooth0, motion0, "0", false);
-        const bool fg_ok1 = foreground1.compute(prep1, smooth1, motion1, "1", false);
-        if (!(fg_ok0 && fg_ok1))
-            continue;
-        ++foreground_passes;
-
-        const bool hand_ok0 = hand0.compute(foreground0, motion0, "0");
-        const bool hand_ok1 = hand1.compute(foreground1, motion1, "1");
-        if (!(hand_ok0 && hand_ok1))
-            continue;
-        ++hand_passes;
-
-        const bool mono_ok0 = mono0.compute(hand0, "0", false);
-        const bool mono_ok1 = mono1.compute(hand1, "1", false);
-        if (!(mono_ok0 && mono_ok1))
-            continue;
-        ++mono_passes;
-
-        // Original code estimated pose asynchronously every ~500 ms. For a
-        // diagnostic runtime, sampling every 15 processed frames is sufficient
-        // and avoids adding another legacy lifetime/thread hazard.
-        if ((frame_num % 15) == 0 && !mono0.points_unwrapped_result.empty())
-            pose_estimator.compute(mono0.points_unwrapped_result);
-
-        if ((frame_num % 10) == 0)
+        try
         {
-            cout << "[RACTIV_RECOVERY] frame=" << frame_num
-                 << " stage=MONO_PASS"
-                 << " left_blobs=" << hand0.primary_hand_blobs.size()
-                 << " right_blobs=" << hand1.primary_hand_blobs.size()
-                 << " left_points=" << mono0.points_unwrapped_result.size()
-                 << " right_points=" << mono1.points_unwrapped_result.size()
-                 << " left_palm=" << point_text(mono0.pt_palm)
-                 << " left_index=" << point_text(mono0.pt_index)
-                 << " left_thumb=" << point_text(mono0.pt_thumb)
-                 << " right_index=" << point_text(mono1.pt_index)
-                 << " pose=" << (pose_name.empty() ? "<none>" : pose_name)
-                 << " output=LOG_ONLY_2D" << endl;
+            stage = "PREPROCESS_FLIP";
+            Mat flipped;
+            flip(frame, flipped, 0); // exact historical vertical flip
+
+            Mat image0 = flipped(Rect(0, 0, 640, 480));
+            Mat image1 = flipped(Rect(640, 0, 640, 480));
+
+            stage = "PREPROCESS_RESIZE";
+            Mat small0;
+            Mat small1;
+            resize(image0, small0, Size(160, 120), 0, 0, INTER_LINEAR);
+            resize(image1, small1, Size(160, 120), 0, 0, INTER_LINEAR);
+
+            stage = "PREPROCESS_CHANNEL_DIFF";
+            Mat prep0;
+            Mat prep1;
+            compute_channel_diff_image(small0, prep0, normalized_preprocess, "recovery0");
+            compute_channel_diff_image(small1, prep1, normalized_preprocess, "recovery1");
+
+            stage = "PREPROCESS_BLUR";
+            Mat smooth0;
+            Mat smooth1;
+            GaussianBlur(prep0, smooth0, Size(1, 19), 0, 0);
+            GaussianBlur(prep1, smooth1, Size(1, 19), 0, 0);
+
+            stage = "MOTION_LEFT";
+            const bool motion_ok0 = motion0.compute(smooth0, "0", false);
+            stage = "MOTION_RIGHT";
+            const bool motion_ok1 = motion1.compute(smooth1, "1", false);
+            if (!(motion_ok0 && motion_ok1))
+                continue;
+            ++motion_passes;
+
+            stage = "FOREGROUND_LEFT";
+            const bool fg_ok0 = foreground0.compute(prep0, smooth0, motion0, "0", false);
+            stage = "FOREGROUND_RIGHT";
+            const bool fg_ok1 = foreground1.compute(prep1, smooth1, motion1, "1", false);
+            if (!(fg_ok0 && fg_ok1))
+                continue;
+            ++foreground_passes;
+
+            stage = "HAND_LEFT";
+            const bool hand_ok0 = hand0.compute(foreground0, motion0, "0");
+            stage = "HAND_RIGHT";
+            const bool hand_ok1 = hand1.compute(foreground1, motion1, "1");
+            if (!(hand_ok0 && hand_ok1))
+                continue;
+            ++hand_passes;
+
+            stage = "MONO_LEFT";
+            const bool mono_ok0 = mono0.compute(hand0, "0", false);
+            stage = "MONO_RIGHT";
+            const bool mono_ok1 = mono1.compute(hand1, "1", false);
+            if (!(mono_ok0 && mono_ok1))
+                continue;
+            ++mono_passes;
+
+            // Original code estimated pose asynchronously every ~500 ms. For a
+            // diagnostic runtime, sampling every 15 processed frames is sufficient
+            // and avoids adding another legacy lifetime/thread hazard.
+            if ((frame_num % 15) == 0 && !mono0.points_unwrapped_result.empty())
+            {
+                stage = "POSE";
+                pose_estimator.compute(mono0.points_unwrapped_result);
+            }
+
+            stage = "TELEMETRY";
+            if ((frame_num % 10) == 0)
+            {
+                cout << "[RACTIV_RECOVERY] frame=" << frame_num
+                     << " stage=MONO_PASS"
+                     << " left_blobs=" << hand0.primary_hand_blobs.size()
+                     << " right_blobs=" << hand1.primary_hand_blobs.size()
+                     << " left_points=" << mono0.points_unwrapped_result.size()
+                     << " right_points=" << mono1.points_unwrapped_result.size()
+                     << " left_palm=" << point_text(mono0.pt_palm)
+                     << " left_index=" << point_text(mono0.pt_index)
+                     << " left_thumb=" << point_text(mono0.pt_thumb)
+                     << " right_index=" << point_text(mono1.pt_index)
+                     << " pose=" << (pose_name.empty() ? "<none>" : pose_name)
+                     << " output=LOG_ONLY_2D" << endl;
+            }
+
+            const auto now = chrono::steady_clock::now();
+            const double report_seconds = chrono::duration<double>(now - report_start).count();
+            if (report_seconds >= 2.0)
+            {
+                const double fps = report_frames / report_seconds;
+                cout << "[RACTIV_RECOVERY] heartbeat"
+                     << " source_fps=" << fps
+                     << " frames=" << frame_num
+                     << " motion_pass=" << motion_passes
+                     << " foreground_pass=" << foreground_passes
+                     << " hand_pass=" << hand_passes
+                     << " mono_pass=" << mono_passes
+                     << " opencv_exceptions=" << opencv_exceptions
+                     << " OS_INJECTION=DISABLED" << endl;
+                report_start = now;
+                report_frames = 0;
+            }
         }
-
-        const auto now = chrono::steady_clock::now();
-        const double report_seconds = chrono::duration<double>(now - report_start).count();
-        if (report_seconds >= 2.0)
+        catch (const cv::Exception& e)
         {
-            const double fps = report_frames / report_seconds;
-            cout << "[RACTIV_RECOVERY] heartbeat"
-                 << " source_fps=" << fps
-                 << " frames=" << frame_num
-                 << " motion_pass=" << motion_passes
-                 << " foreground_pass=" << foreground_passes
-                 << " hand_pass=" << hand_passes
-                 << " mono_pass=" << mono_passes
-                 << " OS_INJECTION=DISABLED" << endl;
-            report_start = now;
-            report_frames = 0;
+            ++opencv_exceptions;
+            cerr << "[RACTIV_RECOVERY] WARN: OpenCV exception"
+                 << " frame=" << frame_num
+                 << " stage=" << stage
+                 << " code=" << e.code
+                 << " func=" << e.func
+                 << " err=" << e.err
+                 << " action=DROP_FRAME_CONTINUE"
+                 << endl;
+            continue;
         }
     }
 
