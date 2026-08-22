@@ -22,10 +22,31 @@ Do not run any historical `win_cursor_plus.exe` during R0/R1.
 
 - Windows 10/11 x64 host;
 - Visual Studio 2022 or Build Tools 2022 with **Desktop development with C++**;
+- **C++ ATL for latest v143 build tools (x86 & x64)** (`Microsoft.VisualStudio.Component.VC.ATL`);
 - CMake available as `cmake.exe`;
 - Git checkout of `shinobione/touch_plus_source_code`.
 
 The executable itself is deliberately generated as **Win32/x86** because the recovered Etron control SDK is 32-bit.
+
+### ATL prerequisite
+
+The July `CameraDS` implementation uses `CComPtr` from `atlbase.h`, and the historical filesystem header includes `atlstr.h`. The normal Build Tools C++ workload may be present while ATL is still missing.
+
+If CMake reports that `atlbase.h` / `atlstr.h` are unavailable, install the ATL component with Visual Studio Installer, or from PowerShell:
+
+```powershell
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$vs = & $vswhere -latest -products * -property installationPath
+$setup = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+
+& $setup modify `
+  --installPath $vs `
+  --add Microsoft.VisualStudio.Component.VC.ATL `
+  --passive `
+  --norestart
+```
+
+Close/reopen PowerShell after the installer finishes.
 
 ## Checkout
 
@@ -88,6 +109,16 @@ Return only:
 ```powershell
 Get-Content .\ractiv_recovery\minimal-build-status.json
 Get-Content .\ractiv_recovery\minimal-build.log -Tail 120
+```
+
+For a noisy MSVC log, extract the first real errors with:
+
+```powershell
+Select-String `
+  -Path .\ractiv_recovery\minimal-build.log `
+  -Pattern ': error ','fatal error','LNK[0-9]{4}','MSB[0-9]{4}' `
+  -Context 3,6 |
+  Select-Object -First 80
 ```
 
 The recovery rule is to patch the **first concrete compiler/linker blocker only** and keep the historical algorithms unchanged.
