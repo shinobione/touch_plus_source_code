@@ -1,0 +1,18 @@
+diff --git a/track_plus_visual_studio/track_plus/track_plus.vcxproj b/track_plus_visual_studio/track_plus/track_plus.vcxproj
+--- a/track_plus_visual_studio/track_plus/track_plus.vcxproj
++++ b/track_plus_visual_studio/track_plus/track_plus.vcxproj
+@@
+-    <ClInclude Include="C:\External Storage\Dropbox\projects\touch_plus_source_code\track_plus_core\track_plus\imu.h" />
++    <ClInclude Include="..\..\track_plus_core\track_plus\imu.h" />
+@@
+-    <PlatformToolset>v120</PlatformToolset>
++    <PlatformToolset>v143</PlatformToolset>
+@@
+-    <PlatformToolset>v120</PlatformToolset>
++    <PlatformToolset>v143</PlatformToolset>
+@@
+-      <AdditionalIncludeDirectories>$(ETRON_DIR)\;$(TURBOJPEG_DIR)\;$(OPENCV_DIR)\..\..\include;$(VCInstallDir)PlatformSDK\include;$(DIRECTSHOW_DIR)\include;$(SFML_DIR)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
++      <AdditionalIncludeDirectories>$(ProjectDir)..\..\dependencies\Etron;$(ProjectDir)..\..\dependencies\TurboJPEG;$(ProjectDir)..\..\dependencies\OpenCV\build\include;$(ProjectDir)..\..\dependencies\DirectShow\Include;$(ProjectDir)..\..\dependencies\SFML\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+@@
+-      <AdditionalLibraryDirectories>$(ETRON_DIR)\;$(OPENCV_DIR)\lib;$(DIRECTSHOW_DIR)\lib;$(TURBOJPEG_DIR)\;$(SFML_DIR)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
++      <AdditionalLibraryDirectories>$(ProjectDir)..\..\dependencies\Etron;$(ProjectDir)..\..\dependencies\OpenCV\build\x86\vc12\lib;$(ProjectDir)..\..\dependencies\DirectShow\lib;$(ProjectDir)..\..\dependencies\TurboJPEG;$(ProjectDir)..\..\dependencies\SFML\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
