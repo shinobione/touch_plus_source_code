@@ -19,6 +19,20 @@ set(CMAKE_CXX_EXTENSIONS ON)
 # project closely and avoiding accidental /MT ABI mismatches.
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+
+    # CameraDS uses ATL CComPtr and filesystem.h historically includes atlstr.h.
+    # The Desktop C++ workload does not always install ATL by default, so fail
+    # at configure time with an actionable prerequisite instead of a long C1083
+    # compile cascade.
+    include(CheckIncludeFileCXX)
+    check_include_file_cxx("atlbase.h" RACTIV_HAVE_ATLBASE_H)
+    check_include_file_cxx("atlstr.h" RACTIV_HAVE_ATLSTR_H)
+    if(NOT RACTIV_HAVE_ATLBASE_H OR NOT RACTIV_HAVE_ATLSTR_H)
+        message(FATAL_ERROR
+            "MSVC ATL headers are required by the recovered July CameraDS path. "
+            "Install Visual Studio component 'C++ ATL for latest v143 build tools (x86 & x64)' "
+            "(component id Microsoft.VisualStudio.Component.VC.ATL), then reconfigure.")
+    endif()
 endif()
 
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
@@ -77,6 +91,28 @@ set_target_properties(touchplus_ractiv_log_only PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/out"
 )
 
+# IMPORTANT: the bundled DirectShow SDK contains an obsolete basetsd.h. If its
+# include directory is searched before the current Windows SDK, modern winnt.h
+# sees that stale basetsd.h and POINTER_64 is never defined, producing the
+# misleading PVOID64/Buffer errors observed on the first real local build.
+# Put the current Windows SDK shared/um headers ahead of the historical
+# DirectShow fallback. qedit.h is absent from current SDKs, so it still falls
+# through to the bundled DirectShow copy while core Windows headers stay modern.
+if(MSVC)
+    set(RACTIV_WINSDK_INCLUDE_ROOT
+        "$ENV{ProgramFiles(x86)}/Windows Kits/10/Include/${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
+    if(NOT EXISTS "${RACTIV_WINSDK_INCLUDE_ROOT}/shared/basetsd.h" OR
+       NOT EXISTS "${RACTIV_WINSDK_INCLUDE_ROOT}/um/windows.h")
+        message(FATAL_ERROR
+            "Could not locate the selected Windows SDK include tree at: ${RACTIV_WINSDK_INCLUDE_ROOT}")
+    endif()
+
+    target_include_directories(touchplus_ractiv_log_only BEFORE PRIVATE
+        "${RACTIV_WINSDK_INCLUDE_ROOT}/shared"
+        "${RACTIV_WINSDK_INCLUDE_ROOT}/um"
+    )
+endif()
+
 target_include_directories(touchplus_ractiv_log_only PRIVATE
     "${CORE}"
     "${ETRON}"
@@ -90,6 +126,7 @@ target_compile_definitions(touchplus_ractiv_log_only PRIVATE
     _CONSOLE
     _CRT_SECURE_NO_WARNINGS
     NOMINMAX
+    WIN32_LEAN_AND_MEAN
     RACTIV_RECOVERY_LOG_ONLY=1
 )
 
