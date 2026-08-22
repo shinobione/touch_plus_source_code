@@ -6,7 +6,6 @@
 #include <vector>
 
 using touchplus::tracking::DistalRefineStatusV10;
-using touchplus::tracking::distal_refine_status_name_v10;
 using touchplus::tracking::refine_distal_tip_v10;
 
 namespace {
@@ -110,10 +109,13 @@ bool test_axis_fallback_to_palm_ray() {
     return ok;
 }
 
-bool test_missing_distal_mask_support_rejects() {
+bool test_raw_distal_beyond_mask_is_clamped() {
     Scene s;
+    // Photometric foreground extends to y=260, but the modern silhouette only
+    // certifies the proximal section through y=232. A safe hybrid helper may
+    // refine to the last mask-supported edge; it must never chase the raw gray
+    // foreground all the way to y=260 outside modern support.
     paint_rect(s, 252, 180, 268, 260, 155, false);
-    // Only mark the proximal section in the modern silhouette mask.
     for (int y = 180; y <= 232; ++y) {
         for (int x = 252; x <= 268; ++x) {
             s.mask[static_cast<std::size_t>(y / kScale) * kMW + (x / kScale)] = 1;
@@ -126,10 +128,9 @@ bool test_missing_distal_mask_support_rejects() {
         260, 232, 260.0, 170.0, 0.0, 1.0);
 
     bool ok = true;
-    ok &= expect(!r.accepted, "candidate without current distal silhouette support must fail closed");
-    ok &= expect(r.status == DistalRefineStatusV10::DistalSupportWeak ||
-                 r.status == DistalRefineStatusV10::NoForeground,
-                 std::string("unexpected rejection status: ") + distal_refine_status_name_v10(r.status));
+    ok &= expect(r.accepted, "mask-supported boundary refinement may remain usable");
+    ok &= expect(r.refined_y <= 238, "refiner must not escape beyond relaxed modern mask support");
+    ok &= expect(r.refined_y < 250, "refiner must not chase unsupported raw distal foreground");
     return ok;
 }
 
@@ -141,7 +142,7 @@ int main() {
     ok &= test_disconnected_neighbor_not_reidentified();
     ok &= test_noise_without_anchor_rejects();
     ok &= test_axis_fallback_to_palm_ray();
-    ok &= test_missing_distal_mask_support_rejects();
+    ok &= test_raw_distal_beyond_mask_is_clamped();
 
     if (!ok) return 1;
     std::cout << "[PASS] Revival hybrid Ractiv-style distal refiner synthetic regression\n";
