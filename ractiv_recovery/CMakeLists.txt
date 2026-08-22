@@ -88,12 +88,14 @@ string(REPLACE
 file(WRITE "${RACTIV_MONO_RECOVERY}" "${RACTIV_MONO_SOURCE}")
 
 # This is intentionally NOT the historical product target. It compiles the
-# smallest practical source closure for the first July-vision hardware smoke.
+# smallest practical source closure for July-vision hardware evaluation.
 # Explicitly excluded: historical main.cpp, IPC, UDP, Reprojector,
-# PointerMapper, HandResolver/output mapping, tool mode and all Windows cursor
-# executables. No legacy OS-input path can therefore be reached from this EXE.
+# PointerMapper, the historical HandResolver implementation/tool mapping, tool
+# mode and all Windows cursor executables. The Recovery-only raw-eye refiner is
+# observational and has no output path beyond logs/viewer overlays.
 set(RACTIV_RECOVERY_SOURCES
     "${CMAKE_CURRENT_LIST_DIR}/log_only_main.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/recovery_hand_resolver.cpp"
 
     # Device + stereo capture / recovered sensor initialization.
     "${CORE}/Camera.cpp"
@@ -166,6 +168,7 @@ if(MSVC)
 endif()
 
 target_include_directories(touchplus_ractiv_log_only PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}"
     "${CORE}"
     "${ETRON}"
     "${TURBOJPEG}"
@@ -238,4 +241,5 @@ target_link_libraries(touchplus_ractiv_log_only PRIVATE
 message(STATUS "Touch+ Ractiv Recovery target: minimal LOG_ONLY Win32")
 message(STATUS "Historical core: ${CORE}")
 message(STATUS "Recovery MonoProcessor source: ${RACTIV_MONO_RECOVERY}")
-message(STATUS "OS input / PointerMapper / Reprojector / IPC / UDP: excluded")
+message(STATUS "Recovery raw-eye index refiner: enabled (no historical Reprojector)")
+message(STATUS "OS input / PointerMapper / historical Reprojector / IPC / UDP: excluded")
