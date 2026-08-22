@@ -1,6 +1,6 @@
-# Phase 2B.10A — hybrid Ractiv-style distal refiner diagnostic
+# Phase 2B.10A / 2B.10B — hybrid Ractiv-style distal refiner
 
-Date: 2026-08-22
+Dates: 2026-08-22 to 2026-08-23
 
 ## Why this branch exists
 
@@ -20,8 +20,6 @@ Branch:
 `revival/hybrid-ractiv-refiner`
 
 ## 2B.10A boundary
-
-2B.10A is intentionally **diagnostic only**.
 
 Accepted modern Phase 2B.9C.2 remains authoritative:
 
@@ -47,31 +45,86 @@ accepted modern fused 2D tip
         -> GREEN diagnostic candidate
 ```
 
-The helper is implemented in C++20 with no OpenCV 2.4 dependency. It ports the Ractiv *idea*, not the historical implementation.
+The helper is C++20-only with no OpenCV 2.4 dependency. It ports the Ractiv *idea*, not the historical implementation.
+
+## 2B.10A physical result — PASS
+
+A clean-background physical retest on the real Touch+ was completed on 2026-08-23. Personal video/frames are not committed.
+
+Observed telemetry over the smoke:
+
+```text
+refiner attempts = 94
+refiner accepts  = 62
+accept rate      ~= 66%
+```
+
+Representative accepted refinements included:
+
+```text
+coarse 369,178 -> refined 359,188 | shift 14.1 px | forward 10.1 px
+coarse 190,135 -> refined 184,140 | shift  7.8 px | forward  7.3 px
+coarse 565,203 -> refined 564,204 | already-near-distal minimal correction
+```
+
+A representative inward/toward-palm candidate was rejected with `MOVED_TOWARD_PALM` rather than published.
+
+Visual review found the accepted green candidate materially more distal on multiple pointing poses, with no obvious accepted jump to another digit in the clean-background retest. Modern identity still remained the authority and could independently fail closed to UNKNOWN.
+
+Verdict:
+
+**2B.10A PHYSICAL PASS — the Ractiv-style local distal-refinement concept is useful when driven by accepted Revival identity.**
+
+## 2B.10B boundary — shadow A/B stereo only
+
+2B.10B deliberately does **not** promote the refined pixel into the official runtime path yet.
+
+Instead:
+
+```text
+A = accepted modern fused tip
+        -> existing accepted stereo path
+        -> official raw/smoothed XYZ/H
+
+B = accepted hybrid refined tip
+        -> same robust Touch+ stereo primitives in parallel
+        -> SHADOW raw XYZ/H telemetry only
+```
+
+A remains authoritative even when B is valid and A is invalid.
+
+The shadow evaluator records:
+
+- A valid/invalid + existing stereo confidence/support;
+- B valid/invalid + shadow stereo confidence/support;
+- B raw surface XYZ/H;
+- `B - A` raw metric delta when both are valid;
+- cumulative `both`, `A_only`, and `B_only` counters.
+
+A `B_only` result is evidence for later evaluation only. It cannot create a finished fingertip, change smoothing, feed contact, or affect any runtime output in this slice.
 
 ## Hard ownership rules
 
-For 2B.10A:
+For 2B.10A/10B:
 
-- the hybrid refiner **cannot create or reacquire identity**;
+- hybrid refinement cannot create or reacquire identity;
 - it runs only when `FusedIdentityV9::publish == true`;
 - disconnected neighboring blobs/fingers are rejected rather than re-identified;
-- a rejected hybrid result falls closed to *no green diagnostic point*;
+- a rejected hybrid result falls closed;
 - the accepted Phase 2B.9C.2 fused pixel remains unchanged;
-- the hybrid point does **not** feed the stereo matcher yet;
-- Touch+ stereo/Q remains the only metric XYZ source;
+- A remains the sole authoritative metric fingertip;
+- B stereo/XYZ is shadow telemetry only;
+- Touch+ stereo/Q remains the only metric XYZ source for both A and shadow B;
 - K/D/R/T/P/Q are unchanged;
 - the validated surface frame is unchanged;
 - no contact state machine is changed;
 - no PointerMapper, mouse/touch injection, UDP cursor path, or OS output is added.
 
-This diagnostic-only split is deliberate: physical evidence must show that the green point is materially more distal and no less anatomically safe before a later 2B.10B may move it into the pre-stereo path.
-
 ## Background
 
 Pressing `B` starts the existing modern 30-frame clean-background learning and, in parallel, a separate 30-frame full-resolution LEFT grayscale background for the hybrid refiner.
 
-This keeps the accepted V5 background implementation untouched while allowing a full-resolution local subtraction experiment.
+The work area must remain clear until both backgrounds report READY.
 
 ## Synthetic regression
 
@@ -83,25 +136,19 @@ This keeps the accepted V5 background implementation untouched while allowing a 
 - missing anatomy axis may fall back to the modern palm -> coarse ray;
 - a proposed distal point without current modern silhouette support fails closed.
 
-The existing V8 identity and V9 fusion self-tests remain unchanged and must still pass on x64 and Win32.
+The existing V8 identity and V9 fusion self-tests remain unchanged and must still pass on x64 and Win32. The full Win32 runtime build is the compile gate for the shadow stereo integration because 2B.10B intentionally reuses the existing production stereo primitives rather than introducing a second independent matcher implementation.
 
-## Physical gate for 2B.10A
+## Physical gate for 2B.10B
 
-Only after CI and a local Win32 build pass should the real Touch+ be used.
+After exact-head CI passes, run the same clean-background pointing smoke and compare A/B telemetry.
 
-Physical test expectation:
+Promotion remains blocked until physical evidence shows that B:
 
-- cyan = modern palm;
-- white = V8 geometry candidate;
-- magenta = frame-synchronized modern anatomy candidate;
-- green X = 2B.10A hybrid refined candidate.
+- preserves the zero-wrong-finite safety rule;
+- does not reduce stereo support/validity materially;
+- improves distal metric placement or useful B-only recovery;
+- remains stable across left/right/diagonal pointing and an open-hand ambiguity case.
 
-The green point should move an already-correct modern candidate toward the visible distal fingertip. It must disappear rather than jump to another digit when the local evidence is not anchored/coherent.
-
-Any evidence that the green point consistently degrades identity is a blocker and the experiment should be discarded without changing accepted Phase 2B.
-
-## Explicitly deferred
-
-A later **2B.10B** may feed the physically validated refined pixel into the existing modern stereo matcher. That is *not* part of this slice.
+Only after that evidence may a later promotion slice consider replacing A's pre-stereo pixel.
 
 Phase 2C contact remains paused. OS input injection remains disabled.
