@@ -52,16 +52,16 @@ Get-ChildItem (Join-Path $root "build") -File | Where-Object {
 } | Copy-Item -Destination $stage
 
 # PoseEstimator reads the historical pose database locally. No menu/daemon/UI
-# directories are needed or allowed in this first recovery package.
+# directories are needed or allowed in this recovery package.
 $database = Join-Path $root "build\database"
 if (Test-Path $database) {
     Copy-Item $database (Join-Path $stage "database") -Recurse
 }
 
 $warning = @'
-TOUCH+ RACTIV RECOVERY — R0/R1 LOG_ONLY
+TOUCH+ RACTIV RECOVERY — R1 LOG_ONLY ANATOMY DIAGNOSTIC
 
-This package is a diagnostic hardware smoke build, not the historical product.
+This package is a diagnostic hardware build, not the historical product.
 
 Compiled path:
   Touch+ Camera
@@ -69,17 +69,32 @@ Compiled path:
     -> ForegroundExtractorNew
     -> HandSplitterNew
     -> MonoProcessorNew
-    -> PoseEstimator telemetry
+    -> Recovery raw-eye index refiner
+    -> PoseEstimator telemetry / diagnostic viewer
+
+The raw-eye index refiner recovers only the useful local full-resolution idea
+from the historical HandResolver. It does NOT compile or use the historical
+HandResolver implementation or its dead-CDN Reprojector dependency.
 
 SAFETY BOUNDARY
 - OS input injection is disabled.
 - PointerMapper is not compiled into this executable.
-- Reprojector/contact output is not compiled into this executable.
+- Historical Reprojector/contact output is not compiled into this executable.
+- Historical HandResolver is not compiled into this executable.
 - IPC/UDP cursor transport is not compiled into this executable.
 - win_cursor_plus / fallback / daemon / menu executables are not packaged.
 
-The first smoke is observational only. Close Windows Camera and other software
-using the Touch+ before launching touchplus_ractiv_log_only.exe.
+Diagnostic viewer:
+  touchplus_ractiv_log_only.exe --viewer
+
+Viewer legend:
+- PALM = cyan
+- COARSE INDEX (MonoProcessorNew 160x120 -> x4) = magenta
+- REFINED INDEX (Recovery full-res raw eye) = green X
+- THUMB = yellow
+
+The smoke is observational only. Close Windows Camera and other software using
+the Touch+ before launching the executable.
 '@
 Set-Content -Path (Join-Path $stage "RUN-LOG-ONLY.txt") -Value $warning -Encoding UTF8
 
@@ -121,11 +136,13 @@ foreach ($needle in $forbiddenStrings) {
 
 $files = @(Get-ChildItem $stage -Recurse -File | Sort-Object FullName)
 $manifest = [ordered]@{
-    boundary = "R0/R1 minimal LOG_ONLY runtime"
+    boundary = "R1 LOG_ONLY raw-eye anatomy diagnostic"
     executable = "touchplus_ractiv_log_only.exe"
     os_injection = "DISABLED"
     pointer_mapper_compiled = $false
     reprojector_compiled = $false
+    historical_hand_resolver_compiled = $false
+    recovery_raw_eye_index_refiner_compiled = $true
     ipc_compiled = $false
     udp_compiled = $false
     forbidden_historical_executables_packaged = $false
@@ -143,7 +160,7 @@ if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
 
 $zipHash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-Write-Host "[RACTIV_RECOVERY] Safe minimal LOG_ONLY package created"
+Write-Host "[RACTIV_RECOVERY] Safe R1 LOG_ONLY anatomy package created"
 Write-Host "  ZIP: $zip"
 Write-Host "  SHA-256: $zipHash"
 Write-Host "  executable count: $($allExes.Count) (minimal runtime only)"
