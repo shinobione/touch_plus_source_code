@@ -33,6 +33,22 @@ struct MetricDiagnosticsV9 {
     double nearest_disparity_px = std::numeric_limits<double>::quiet_NaN();
     int refined_candidates = 0;
     int refined_consistent = 0;
+
+    // Phase 2C.1C diagnostic-only accounting for the 7x7 local stereo probes.
+    // These counters classify why probes fail without changing any matcher,
+    // calibration, surface, identity, smoothing or contact acceptance rule.
+    int probe_total = 0;
+    int probe_out_of_bounds = 0;
+    int probe_outside_hand_mask = 0;
+    int probe_forward_match_fail = 0;
+    int probe_reverse_match_fail = 0;
+    int probe_left_right_mismatch = 0;
+    int probe_matcher_other_fail = 0;
+    int probe_q_projection_fail = 0;
+    int probe_surface_h_reject = 0;
+    int probe_surface_roi_reject = 0;
+    int probe_accepted = 0;
+
     std::string reject_reason = "NOT_RUN";
 };
 
@@ -214,17 +230,64 @@ public:
         constexpr std::array<int, 7> offsets{{-12, -8, -4, 0, 4, 8, 12}};
         for (const int oy : offsets) {
             for (const int ox : offsets) {
+                ++metric_diagnostics_.probe_total;
                 const int sx = px + ox, sy = py + oy;
-                if (sx < 12 || sx >= touchplus::depth::kEyeWidth - 5 || sy < 5 || sy >= touchplus::depth::kEyeHeight - 5) continue;
+                if (sx < 12 || sx >= touchplus::depth::kEyeWidth - 5 || sy < 5 || sy >= touchplus::depth::kEyeHeight - 5) {
+                    ++metric_diagnostics_.probe_out_of_bounds;
+                    continue;
+                }
                 const int sgx = sx / touchplus::depth::kDepthScale;
                 const int sgy = sy / touchplus::depth::kDepthScale;
-                if (!mask_near_v5(selected_mask_, touchplus::depth::kDepthWidth, touchplus::depth::kDepthHeight, sgx, sgy, 1)) continue;
+                if (!mask_near_v5(selected_mask_, touchplus::depth::kDepthWidth, touchplus::depth::kDepthHeight, sgx, sgy, 1)) {
+                    ++metric_diagnostics_.probe_outside_hand_mask;
+                    continue;
+                }
+
                 const auto match = touchplus::depth::robust_point_detail::mutually_consistent_match(left_gray, right_gray, sx, sy, min_d, max_d);
-                if (!match.valid) continue;
+                if (!match.valid) {
+                    // Classification-only replay of the existing matcher stages.
+                    // The authoritative match above remains untouched.
+                    const auto forward = touchplus::depth::robust_point_detail::search_left_to_right(
+                        left_gray, right_gray, sx, sy, min_d, max_d);
+                    if (!forward.valid) {
+                        ++metric_diagnostics_.probe_forward_match_fail;
+                    } else {
+                        const int right_x = static_cast<int>(std::lround(sx - forward.disparity));
+                        const int narrow_min = std::max(
+                            touchplus::depth::robust_point_detail::kMinDisparity,
+                            static_cast<int>(std::floor(forward.disparity - 3.0)));
+                        const int narrow_max = std::min(
+                            touchplus::depth::robust_point_detail::kMaxDisparity,
+                            static_cast<int>(std::ceil(forward.disparity + 3.0)));
+                        const auto reverse = touchplus::depth::robust_point_detail::search_right_to_left(
+                            right_gray, left_gray, right_x, sy, narrow_min, narrow_max);
+                        if (!reverse.valid) {
+                            ++metric_diagnostics_.probe_reverse_match_fail;
+                        } else if (std::abs(reverse.disparity - forward.disparity) >
+                                   touchplus::depth::robust_point_detail::kLeftRightTolerancePx) {
+                            ++metric_diagnostics_.probe_left_right_mismatch;
+                        } else {
+                            ++metric_diagnostics_.probe_matcher_other_fail;
+                        }
+                    }
+                    continue;
+                }
+
                 const auto camera = touchplus::surface::camera_point_from_q(calibration, static_cast<double>(sx), static_cast<double>(sy), match.disparity);
-                if (!std::isfinite(camera.x) || !std::isfinite(camera.y) || !std::isfinite(camera.z)) continue;
+                if (!std::isfinite(camera.x) || !std::isfinite(camera.y) || !std::isfinite(camera.z)) {
+                    ++metric_diagnostics_.probe_q_projection_fail;
+                    continue;
+                }
                 const auto sp = touchplus::surface::to_surface(surface, camera);
-                if (!std::isfinite(sp.h_mm) || sp.h_mm < 2.0 || sp.h_mm > kV6MaxSupportHmm + 20.0 || std::abs(sp.x_mm) > roi_half_x || std::abs(sp.y_mm) > roi_half_y) continue;
+                if (!std::isfinite(sp.h_mm) || sp.h_mm < 2.0 || sp.h_mm > kV6MaxSupportHmm + 20.0) {
+                    ++metric_diagnostics_.probe_surface_h_reject;
+                    continue;
+                }
+                if (std::abs(sp.x_mm) > roi_half_x || std::abs(sp.y_mm) > roi_half_y) {
+                    ++metric_diagnostics_.probe_surface_roi_reject;
+                    continue;
+                }
+                ++metric_diagnostics_.probe_accepted;
                 refined.push_back(sp);
             }
         }
@@ -311,6 +374,17 @@ private:
             std::cout << "nan";
         std::cout << " refined_candidates=" << metric_diagnostics_.refined_candidates
                   << " refined_consistent=" << metric_diagnostics_.refined_consistent
+                  << " probes=" << metric_diagnostics_.probe_total
+                  << " oob=" << metric_diagnostics_.probe_out_of_bounds
+                  << " mask=" << metric_diagnostics_.probe_outside_hand_mask
+                  << " fwd_fail=" << metric_diagnostics_.probe_forward_match_fail
+                  << " rev_fail=" << metric_diagnostics_.probe_reverse_match_fail
+                  << " lr_fail=" << metric_diagnostics_.probe_left_right_mismatch
+                  << " matcher_other=" << metric_diagnostics_.probe_matcher_other_fail
+                  << " q_fail=" << metric_diagnostics_.probe_q_projection_fail
+                  << " h_reject=" << metric_diagnostics_.probe_surface_h_reject
+                  << " roi_reject=" << metric_diagnostics_.probe_surface_roi_reject
+                  << " accepted=" << metric_diagnostics_.probe_accepted
                   << " identity_confidence=" << identity_confidence_
                   << " stereo_confidence=" << stereo_confidence_
                   << " reason=" << metric_diagnostics_.reject_reason
