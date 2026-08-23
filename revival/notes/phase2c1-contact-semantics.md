@@ -4,8 +4,12 @@ Date: 2026-08-23
 
 ## Status
 
-Implemented on `revival/phase2c1-contact-semantics`; synthetic/CI gates are
-required before the physical handoff. Physical validation remains pending.
+Implemented on `revival/phase2c1-contact-semantics`; synthetic/CI gates pass.
+The first real-device semantic-contact smoke was executed against exact-head
+implementation `9490116b8c727a4c7bfca3c9f3adcf3b2d01ed79` and **did not pass the
+physical acceptance gate**. The failure is conservative/false-negative: no
+spurious `TOUCH_DOWN` was observed, but no intended physical contact produced a
+`TOUCH_DOWN` either.
 
 Accepted base: `revival/main` after PR #16 / Phase 2B.10D physical PASS and merge at:
 
@@ -145,6 +149,63 @@ Required real-device sequences:
 - no-hand scene: zero events.
 
 Physical review must compare event timing to the actual finger/table contact in video and inspect H telemetry. A confident false `TOUCH_DOWN` while visibly hovering is a BLOCKER.
+
+## First physical smoke — FAIL (false-negative)
+
+Real-device video reviewed on 2026-08-23, duration about 114.5 s, using the
+exact-head artifact from implementation commit:
+
+`9490116b8c727a4c7bfca3c9f3adcf3b2d01ed79`
+
+The requested sequence included clear hover, near-surface hover, slow physical
+contact, hold/drag, repeated taps, intentional loss/re-entry and a final no-hand
+interval.
+
+Observed final contact counters:
+
+```text
+DOWN_total = 0
+UP_total   = 0
+OS_INJECTION=DISABLED
+```
+
+Safety side: no false `TOUCH_DOWN` was observed during the high-hover,
+near-hover or no-hand portions.
+
+Sensitivity side: intended physical contacts and repeated taps also produced no
+`TOUCH_DOWN`, so the required physical behavior is absent and the slice cannot
+be accepted or merged yet.
+
+The video telemetry shows valid accepted fingertip samples during attempted
+near-contact/contact periods, but sampled `H` values remain in the **tens of
+millimetres** rather than entering the `candidate_h_mm=6` /
+`contact_down_h_mm=4` window. Representative visible transition/heartbeat
+samples include approximately `H=33.7`, `26.0`, `42–47`, `53–60` mm while the
+finger is being driven toward/at the working surface. Identity also drops to
+invalid/UNKNOWN frequently, correctly failing closed.
+
+Interpretation: this is not evidence that the surface frame should be changed,
+and it is not justification to blindly raise the 4/6/8 mm thresholds. The
+accepted Phase 2A surface frame previously measured the bare surface near
+`H=0`; the present mismatch is specifically between the **authoritative
+fingertip sample used by Phase 2C** and the physical finger/table contact point.
+
+### Required next action before retuning
+
+Keep PR #17 Draft and OS injection disabled. Add a focused diagnostic/physical
+characterisation step that records stable H distributions for three explicitly
+labelled physical conditions using the same authoritative fingertip stream:
+
+1. high hover;
+2. near hover without contact;
+3. sustained physical fingertip contact.
+
+The purpose is to determine whether Phase 2C needs a contact-point geometric
+proxy/offset, a different accepted fingertip metric sample, or merely revised
+thresholds. Do not alter K/D/R/T/P/Q or the accepted surface frame to hide the
+offset.
+
+**Physical verdict: FAIL / SAFE FALSE-NEGATIVE.**
 
 ## Merge rule
 
