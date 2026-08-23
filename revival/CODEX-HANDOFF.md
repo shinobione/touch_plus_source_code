@@ -30,11 +30,23 @@ Design note:
 
 `revival/notes/phase2c1-contact-semantics.md`
 
+Physical diagnostic note:
+
+`revival/notes/phase2c1a-h-characterization.md`
+
+## Current physical status
+
+Phase 2C.1 first smoke was a safe false-negative: `DOWN_total=0`, `UP_total=0`, no false touch, but no intended touch either.
+
+Phase 2C.1A H-characterization run #1 then showed sparse valid high-hover samples around 60 mm and a readable near-hover sample around 43.7 mm, but the physical-contact pose was dominated by `NO_FINGER` / `INVALID_SAMPLE` with identity/fingertip state UNKNOWN/stale/non-current. No stable CONTACT H distribution was obtained.
+
+**Do not retune 6/4/8 mm yet. The next blocker to characterize is identity/sample continuity at or extremely near physical contact.**
+
+The next implementation, if requested, should be diagnostic-only: self-labelled per-frame CSV capture for HIGH / NEAR / CONTACT including validity/rejection state, raw H and smoothed H. It must not alter accepted tracking/contact behavior.
+
 ## Objective
 
-Add a deterministic contact state machine on top of the already-selected authoritative fingertip stream (`Xsurface / Ysurface / H`).
-
-Externally visible semantic events only:
+The existing Phase 2C.1 state machine produces only:
 
 ```text
 HOVER
@@ -56,9 +68,9 @@ No Windows mouse/touch injection, PointerMapper, UDP, click synthesis or other O
 - capture, matcher, sidecar, fingertip identity/fusion, refiner, 2B.10C gate and 2B.10D promotion rules unchanged;
 - OS injection remains disabled.
 
-## Initial first-smoke constants
+## Current contact constants
 
-Use the values from the design note exactly for the first implementation:
+Do not change these without new physical evidence:
 
 ```text
 candidate_h_mm    = 6.0
@@ -71,65 +83,38 @@ max_frame_dh_mm   = 20.0
 max_frame_dxy_mm  = 50.0
 ```
 
-Do not silently tune them from synthetic tests.
+## Next diagnostic working set
 
-## Primary working set
+If implementing the next diagnostic, start only from:
 
-Start from only:
-
-- `revival/notes/phase2c1-contact-semantics.md`;
-- the final authoritative fingertip result path in `revival/src/depth_surface_frame_runtime_v10.h`;
-- a new isolated contact-state-machine header/source + self-test;
-- `revival/phase2b_test/CMakeLists.txt` (or a narrowly scoped Phase 2C test target if cleaner);
-- `.github/workflows/revival-fingertip.yml` only as needed to add the new self-test / package the physical kit;
-- runtime telemetry integration only where necessary.
+- `revival/notes/phase2c1a-h-characterization.md`;
+- `revival/src/depth_surface_frame_runtime_v10.h` around current contact/raw-H telemetry;
+- `revival/tools/start-touchplus-phase2b9c.ps1` only if diagnostic hotkeys/launch options require it;
+- `.github/workflows/revival-fingertip.yml` only for packaging/test wiring.
 
 Do not read all historical Phase 2B notes.
 
-## Required behavior
+## Next diagnostic requirements
 
-- one low-H sample never creates DOWN;
-- sustained near-surface approach creates exactly one DOWN;
-- held finger never repeats DOWN;
-- lateral XY movement while low stays held;
-- release hysteresis creates exactly one UP;
-- identity loss/change while held emits one fail-safe UP then resets;
-- invalid/non-finite/excessive jump fails closed;
-- repeated taps create one DOWN/UP pair each;
-- A and B selected-source samples obey identical contact semantics.
+Diagnostic only, no behavior changes:
 
-## Telemetry
-
-Expose transition lines and periodic state telemetry containing at least:
-
-```text
-contact_state
-contact_event
-contact_reason
-identity_id
-fingertip_source
-X / Y / H
-dH / dXY
-candidate_count / release_count
-DOWN_total / UP_total
-OS_INJECTION=DISABLED
-```
+- operator labels `HIGH`, `NEAR`, `CONTACT` (hotkeys or another explicit runtime label mechanism);
+- per-frame CSV containing timestamp/frame, label, identity accepted/current/stale, fingertip valid, source A/B, raw H, smoothed H, rejection reason;
+- record invalid/UNKNOWN rows too;
+- preserve all current contact thresholds and state transitions;
+- preserve A/B selection, surface frame and calibration;
+- `OS_INJECTION=DISABLED`.
 
 ## Regression / packaging contract
 
-Before handoff to the bench:
+Before another physical handoff:
 
-- add focused synthetic coverage from the design note;
-- keep existing V8/V9/2B.10A/2B.10C/2B.10D tests green x64 + Win32;
+- keep existing V8/V9/2B.10A/2B.10C/2B.10D/2C.1 tests green x64 + Win32;
 - keep Phase 2A + Phase 1C/Q regressions green;
 - build the real Revival Win32 runtime;
 - package an exact-head Win32 physical-smoke artifact;
-- include the sidecar launcher path already used by the accepted stack;
+- include the reusable bench-cache-aware launcher;
 - report SHA, files changed, tests, artifact and exact launch command;
 - commit + push only to `revival/phase2c1-contact-semantics`;
 - do not merge;
 - do not claim physical acceptance.
-
-Physical blocker:
-
-**any confident `TOUCH_DOWN` while the fingertip is visibly hovering = BLOCKER.**
