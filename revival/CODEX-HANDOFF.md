@@ -21,7 +21,7 @@ Revival integration branch:
 
 Read `AGENTS.md` before modifying anything.
 
-## Active/paused work at handoff creation
+## Active/paused work
 
 ### Active experiment
 
@@ -31,13 +31,25 @@ Branch:
 
 `revival/hybrid-ractiv-refiner`
 
-Current objective:
+2B.10A physically validated the Ractiv-inspired local full-resolution distal refiner when driven by accepted modern Revival fingertip identity.
 
-Evaluate the Ractiv-inspired local full-resolution fingertip refiner in **shadow A/B** against the accepted modern Revival fingertip path.
+2B.10B then evaluated that refined pixel through the existing robust Touch+ stereo primitives in a **shadow A/B** path while keeping A authoritative.
 
-The authoritative path is A. Hybrid-refined path B is diagnostic/shadow only until a separate promotion decision.
+Physical 2B.10B result recorded on 2026-08-23:
 
-Before continuing, fetch the current PR #14 body and exact head SHA; do not rely on the head recorded in an old chat.
+```text
+refiner accepts / attempts = 30 / 62
+shadow valid / attempted   = 28 / 30
+both A+B valid             = 26
+A_only                     = 1
+B_only                     = 2
+```
+
+Verdict: **PHYSICAL PASS / PROMISING**. A remains authoritative. B remains shadow-only.
+
+The next minimal slice is **Phase 2B.10C — counterfactual promotion gate**. It must not promote B into runtime output. It should only compute whether a frame would have selected B under a strict gate.
+
+Before continuing, fetch the current PR #14 body and exact head SHA; do not rely on a head recorded in an old chat.
 
 ### Paused contact experiment
 
@@ -67,7 +79,7 @@ The following remain authoritative:
 - modern fingertip identity/fusion safety;
 - fail-closed behavior on uncertain anatomy.
 
-## Hybrid refiner evaluation rule
+## Hybrid refiner ownership rule
 
 The Ractiv-inspired refiner may only answer:
 
@@ -79,15 +91,43 @@ It may **not** answer:
 
 That identity remains the responsibility of the accepted modern pipeline.
 
-## Promotion gate
+## 2B.10C counterfactual promotion gate
+
+2B.10C must remain diagnostic and output only a selection decision such as:
+
+```text
+KEEP_A
+WOULD_SELECT_B
+```
+
+`WOULD_SELECT_B` may be emitted only when:
+
+- A and B are both valid;
+- modern identity/fusion remains current and accepted;
+- B improves the confidence/support evidence strictly enough to justify evaluation;
+- refined 2D displacement remains within explicit bounded limits;
+- A/B metric delta is finite and within explicit coherence bounds.
+
+Hard exclusions:
+
+- `B_only` is never promotable in 2B.10C;
+- UNKNOWN/stale identity is never promotable;
+- non-finite or excessive metric deltas are never promotable;
+- a rejected/inward hybrid refinement is never promotable;
+- official runtime output, smoothing and XYZ/H remain A-only;
+- Phase 2C and OS injection remain untouched.
+
+The later physical gate should inspect only `WOULD_SELECT_B` frames. Any anatomically wrong finite candidate remains a BLOCKER.
+
+## Promotion rule
 
 Do not promote B into the authoritative path on CI evidence alone.
 
-A promotion requires a real-device A/B physical review with representative pointing poses and ambiguity cases. The binding blocker remains:
+A real-device review remains binding. The core safety rule is:
 
 **wrong finite/HIGH fingertip = BLOCKER; UNKNOWN is acceptable.**
 
-If B is useful only on a subset of poses, it may remain a shadow diagnostic or be promoted only behind a strict confidence gate in a new slice.
+If B is useful only on a subset of poses, it may remain shadow diagnostic or be promoted only behind a strict confidence gate in a later slice.
 
 ## Recommended Codex session start
 
