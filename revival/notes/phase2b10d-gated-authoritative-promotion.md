@@ -5,9 +5,8 @@ Date: 2026-08-23
 ## Status
 
 Implemented on `revival/phase2b10d-gated-promotion` as an experimental,
-explicit-opt-in slice. Local synthetic regressions and the real Win32 runtime
-build pass. Exact-head CI and the promotion-enabled physical smoke remain
-required; this status is not a physical acceptance.
+explicit-opt-in slice. Local synthetic regressions, the real Win32 runtime build,
+exact-head CI, and the promotion-enabled real-device smoke all pass.
 
 PR #14 merged the physically validated 2B.10A/10B/10C hybrid-refiner diagnostics into `revival/main` at:
 
@@ -70,12 +69,13 @@ Do not make promotion sticky across launches.
 Implemented runtime control:
 
 ```powershell
-.\touchplus_phase2b_tracker.exe --enable-hybrid-promotion
+powershell.exe -ExecutionPolicy Bypass -File .\start-touchplus-phase2b9c.ps1 -EnableHybridPromotion
 ```
 
-Without `--enable-hybrid-promotion`, startup reports
-`promotion_mode=DISABLED` and the accepted A result/smoothing path is not
-mutated by the 2B.10D layer. The flag is process-local and is not persisted.
+The launcher starts the required anatomy sidecar and forwards the process-local
+`--enable-hybrid-promotion` flag to the tracker. Without the opt-in, startup
+reports `promotion_mode=DISABLED` and the accepted A result/smoothing path is not
+mutated by the 2B.10D layer.
 
 ## Authoritative selection boundary
 
@@ -182,8 +182,68 @@ PASS requires:
 
 Any anatomically wrong finite promoted B sample is a BLOCKER.
 
+## Physical result — PASS
+
+A promotion-enabled real-device smoke was reviewed on 2026-08-23 over about 100 seconds using the exact-head 2B.10D kit and the accepted per-setup surface frame.
+
+The launcher reported `promotion_mode=ENABLED`; background learning completed on a clear no-hand scene before the hand entered.
+
+Final observed telemetry:
+
+```text
+refiner accepts / attempts = 79 / 115
+shadow valid / attempted   = 40 / 79
+both A+B valid             = 33
+A_only                     = 5
+B_only                     = 7
+
+gate evaluations           = 625
+KEEP_A                     = 621
+WOULD_SELECT_B             = 4
+selected_A                 = 621
+selected_B                 = 4
+source_switches             = 8
+```
+
+Reason counters at the end included:
+
+```text
+IDENTITY_UNKNOWN              = 413
+IDENTITY_STALE                = 97
+REFINER_INWARD                = 26
+REFINER_REJECTED              = 25
+B_ONLY_INELIGIBLE             = 6
+A_INVALID                     = 27
+B_INVALID                     = 5
+EVIDENCE_NOT_STRICTLY_BETTER = 20
+EXCESSIVE_2D_DELTA            = 2
+STRICT_EVIDENCE_GAIN          = 4
+```
+
+The four authoritative B selections exactly matched the four `WOULD_SELECT_B` decisions. Visual review of the corresponding intervals found the promoted point on the real distal index fingertip; no anatomically wrong finite promoted B sample was observed.
+
+A representative promoted frame reported:
+
+```text
+A = VALID / MEDIUM, support=3
+B = VALID / MEDIUM, support=4
+shift_px = 5.4
+dXYZ ~= 1.7 mm
+dH ~= -0.5 mm
+selected_source = B
+selected_reason = STRICT_EVIDENCE_GAIN
+```
+
+The remaining frames failed closed to A under unknown/stale identity, rejected/inward refinement, invalid A/B evidence, non-strict evidence, `B_only`, or excessive 2D displacement. No contact or OS event was emitted; `OS_INJECTION=DISABLED` remained explicit throughout.
+
+**2B.10D verdict: PHYSICAL PASS for explicit gated authoritative promotion.**
+
+This pass validates the opt-in gated promotion behavior only. It does not make promotion default-on, and it does not authorize Phase 2C or OS injection changes.
+
+Personal smoke video/frames are evidence only and are not committed.
+
 ## Merge rule
 
 Do not merge 2B.10D based on CI alone.
 
-The branch stays Draft until exact-head CI passes and the explicit promotion-enabled physical smoke passes on the real Touch+.
+The branch may leave Draft only after exact-head CI is green on the documentation-updated head. The explicit promotion-enabled physical smoke has passed on the real Touch+.
