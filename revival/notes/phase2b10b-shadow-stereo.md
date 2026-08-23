@@ -8,6 +8,12 @@ Implementation complete on `revival/hybrid-ractiv-refiner`.
 
 This slice is **shadow-only**. The accepted modern Phase 2B.9C.2 result remains authoritative and unchanged.
 
+Physical smoke completed on the real Touch+ on 2026-08-23.
+
+**Verdict: PHYSICAL PASS / PROMISING — B remains shadow-only; no promotion in this slice.**
+
+Personal video/frames are not committed.
+
 ## Boundary
 
 ```text
@@ -35,46 +41,73 @@ The runtime reports:
 
 `B_only` is evidence only.
 
+## Physical result — PASS / PROMISING
+
+Observed end-of-run telemetry:
+
+```text
+refiner accepts / attempts = 30 / 62
+shadow valid / attempted   = 28 / 30
+both A+B valid             = 26
+A_only                     = 1
+B_only                     = 2
+```
+
+Representative useful case:
+
+```text
+coarse 307,154 -> refined 300,150
+shift = 8.1 px
+
+A = VALID / MEDIUM
+support = 4
+XYZ = (1.2, -54.7, H=74.6)
+
+B = VALID / HIGH
+support = 7
+XYZ = (0.7, -54.5, H=75.8)
+
+B - A: dXYZ ~= 1.4 mm, dH ~= +1.3 mm
+```
+
+This is encouraging because the refined distal pixel increased stereo support/confidence while remaining metrically coherent with A rather than producing a spurious depth jump.
+
+Another representative case:
+
+```text
+coarse 285,186 -> refined 279,188
+A H = 68.1 mm
+B H = 68.2 mm
+```
+
+Here the 2D refinement mostly changed surface X while preserving H, which is consistent with moving toward the visible distal fingertip rather than hallucinating depth.
+
+A rejected inward refinement produced `MOVED_TOWARD_PALM`, and B did not run for that candidate while A remained valid.
+
+No obviously wrong finite MEDIUM/HIGH shadow fingertip was observed during this smoke. This does **not** authorize B to become authoritative; it only clears 2B.10B as a useful shadow experiment and justifies a later counterfactual promotion-gate slice.
+
 ## Exact-head CI
 
-Head:
+The 2B.10B implementation CI was green before the physical smoke. Subsequent documentation/governance commits do not alter the runtime boundary described above.
 
-`56ac40db29f339248d4772e0439cbdf54bd9e545`
+## Next gate — 2B.10C counterfactual promotion selector
 
-All four workflows completed successfully:
+The next minimal slice should remain non-authoritative and produce only:
 
-- Revival Fingertip 3D #201 — SUCCESS
-- Revival Windows Build #375 — SUCCESS
-- Revival Surface Frame #219 — SUCCESS
-- Revival Calibration Capture Kit #42 — SUCCESS
+```text
+KEEP_A
+WOULD_SELECT_B
+```
 
-The Win32 Phase 2B job passed V8, V9, refiner self-test, full Revival build, Phase 2A surface regression, Phase 1C/Q regression, packaging and artifact upload.
+`WOULD_SELECT_B` is allowed only when A and B are both valid, modern identity remains accepted, and B strictly improves the confidence/support evidence without violating bounded 2D displacement or metric-coherence rules.
 
-## Artifact
+Hard rules for 2B.10C:
 
-GitHub artifact id: `9483864866`
-
-Artifact source name (workflow still uses the older 2B.10A label):
-
-`touchplus-phase2b10a-hybrid-refiner-windows`
-
-SHA-256:
-
-`06d279ed98368a67345dc561ce479b3a974d6c453836e6f632f5b66a100d6551`
-
-The packaged EXE was checked to contain the 2B.10B shadow telemetry strings, including `2B.10B_SHADOW_AB`, `authoritative=A`, `B_only`, and `OS_INJECTION=DISABLED`.
-
-## Physical gate
-
-Use the same clean-background protocol as the successful 2B.10A retest:
-
-1. clear the work area;
-2. press `B`;
-3. keep hands out until both modern and hybrid backgrounds report READY;
-4. test left, right and diagonal index poses;
-5. include a brief open-hand ambiguity case;
-6. inspect A/B support, validity and raw XYZ/H.
-
-Promotion remains blocked unless physical evidence shows that B improves useful stereo/metric placement without producing any wrong finite MEDIUM/HIGH fingertip.
+- `B_only` is always ineligible;
+- UNKNOWN/stale identity is always ineligible;
+- non-finite or excessive metric delta is always ineligible;
+- runtime output, smoothing and official XYZ/H continue to use A only;
+- any anatomically wrong finite candidate remains a BLOCKER;
+- the later physical gate inspects only `WOULD_SELECT_B` cases.
 
 Phase 2C remains paused. OS injection remains disabled.
