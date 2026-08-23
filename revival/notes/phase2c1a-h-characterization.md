@@ -24,20 +24,20 @@ Use default accepted A mode. Do not enable hybrid promotion.
 1. Start a fresh tracker/sidecar session.
 2. With no hand visible, press `B` once and wait for `background=READY`.
 3. Leave the scene empty for ~5 s.
-4. Perform **three complete cycles** of the following labelled-by-order conditions:
-   - HIGH HOVER: index clearly high above the table, stable for 10 s;
-   - CLEAR GAP: remove the hand from view for 3 s;
-   - NEAR HOVER: index as close to the table as possible without touching, stable for 10 s;
-   - CLEAR GAP: remove the hand from view for 3 s;
-   - PHYSICAL CONTACT: fingertip visibly resting on the table, held still for 10 s;
-   - CLEAR GAP: remove the hand from view for 3 s.
-5. Finish with an empty scene for ~5 s.
+4. Perform the labelled-by-order conditions:
+   - HIGH HOVER: index clearly high above the table and stable;
+   - CLEAR GAP: remove the hand from view;
+   - NEAR HOVER: index as close to the table as possible without touching and stable;
+   - CLEAR GAP: remove the hand from view;
+   - PHYSICAL CONTACT: fingertip visibly resting on the table and held still;
+   - CLEAR GAP: remove the hand from view.
+5. Finish with an empty scene.
 
 Do not perform taps or dragging in this diagnostic. The goal is stable per-condition H distributions, not contact-event acceptance.
 
 ## What to extract
 
-For each of the three conditions and each repetition, review only frames where the authoritative identity/sample is current and valid. Record:
+For each condition, review only frames where the authoritative identity/sample is current and valid. Record:
 
 - contact-consumed `smoothed_tip H` from `[CONTACT] heartbeat`;
 - accepted raw H from the adjacent `[HYBRID] heartbeat` when available;
@@ -54,9 +54,43 @@ Summarize, per condition, at minimum:
 - approximate spread / overlap between HIGH HOVER, NEAR HOVER and CONTACT;
 - raw-vs-smoothed H offset.
 
+## Physical run #1 result
+
+A real-device recording of approximately 99.7 s was reviewed on 2026-08-23.
+
+Readable current/valid transition telemetry during the first (high-hover) hand-present interval included smoothed H values around:
+
+```text
+60.0 mm
+59.6 mm
+61.6 mm
+```
+
+The second (near-hover) interval produced only sparse valid samples; one clearly readable valid transition reported approximately:
+
+```text
+H = 43.7 mm
+```
+
+During the third (physical-contact) interval, Phase 2C telemetry was dominated by `NO_FINGER` / `INVALID_SAMPLE` with identity/fingertip state frequently UNKNOWN, stale or non-current. No stable current/valid CONTACT H series was obtained.
+
+Final semantic counters remained:
+
+```text
+DOWN_total = 0
+UP_total   = 0
+OS_INJECTION=DISABLED
+```
+
+The run is therefore **inconclusive for CONTACT-H threshold tuning but diagnostically useful**. High versus near hover moved in the expected direction, but the physical-contact pose did not produce enough eligible samples to compute a contact distribution or near/contact overlap. Raw-A versus smoothed-H offset also remains uncharacterized because adjacent valid raw-A telemetry was too sparse.
+
+The dominant blocker exposed by this run is now authoritative identity/sample continuity at or extremely near physical contact. Do not change the 6/4/8 mm thresholds from this evidence alone.
+
+Detailed run note: `revival/notes/phase2c1a-h-characterization-smoke-2026-08-23.md`.
+
 ## Decision rule
 
-Do **not** change the current 6/4/8 mm thresholds until these distributions are reviewed.
+Do **not** change the current 6/4/8 mm thresholds until physical-contact samples are measurable.
 
 The next implementation decision must be data-backed:
 
@@ -65,6 +99,12 @@ The next implementation decision must be data-backed:
 - if raw H is near the physical surface while smoothed H is not, inspect the smoothing/contact-input boundary instead of touching surface calibration;
 - if identity validity dominates the failure, fix contact eligibility continuity rather than H thresholds;
 - never alter the accepted surface frame or K/D/R/T/P/Q merely to force contact H toward zero.
+
+## Required next diagnostic
+
+The next physical run should be self-labelling and machine-readable rather than relying on sparse console heartbeats. Add diagnostic-only operator labels (`HIGH`, `NEAR`, `CONTACT`) and per-frame CSV capture of label, identity/current/stale state, fingertip validity, source, raw H, smoothed H and rejection reason. Invalid frames must also be recorded so validity rate per pose can be measured.
+
+This instrumentation must not alter accepted tracking/contact behavior, thresholds, calibration, surface geometry or OS output.
 
 ## Safety boundary
 
