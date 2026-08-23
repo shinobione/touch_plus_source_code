@@ -44,6 +44,12 @@ jobs:
           & "build/fingertip-x64/Release/touchplus_fingertip_refiner_selftest.exe"
           if ($LASTEXITCODE -ne 0) { throw "Phase 2B.10A hybrid refiner x64 self-test failed: $LASTEXITCODE" }
 
+      - name: Run 2B.10C counterfactual promotion gate self-test x64
+        shell: pwsh
+        run: |
+          & "build/fingertip-x64/Release/touchplus_fingertip_promotion_gate_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.10C promotion gate x64 self-test failed: $LASTEXITCODE" }
+
   landmark-live-sidecar-probe:
     runs-on: windows-latest
     steps:
@@ -139,6 +145,12 @@ jobs:
           & "build/fingertip-x86/Release/touchplus_fingertip_refiner_selftest.exe"
           if ($LASTEXITCODE -ne 0) { throw "Phase 2B.10A hybrid refiner Win32 self-test failed: $LASTEXITCODE" }
 
+      - name: Run 2B.10C counterfactual promotion gate self-test Win32
+        shell: pwsh
+        run: |
+          & "build/fingertip-x86/Release/touchplus_fingertip_promotion_gate_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2B.10C promotion gate Win32 self-test failed: $LASTEXITCODE" }
+
       - name: Configure Revival Win32
         run: cmake -S revival -B build/revival-x86 -A Win32
 
@@ -160,11 +172,11 @@ jobs:
           & $exe --self-test $cal
           if ($LASTEXITCODE -ne 0) { throw "Phase 1C depth self-test regressed: $LASTEXITCODE" }
 
-      - name: Prepare Phase 2B.10A hybrid refiner diagnostic kit
+      - name: Prepare Phase 2B.10C counterfactual gate diagnostic kit
         shell: pwsh
         run: |
           $src = "build/revival-x86/Release"
-          $kit = "build/touchplus-phase2b10a-hybrid-refiner"
+          $kit = "build/touchplus-phase2b10c-counterfactual-gate"
           New-Item -ItemType Directory -Force -Path $kit | Out-Null
           New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
 
@@ -185,13 +197,15 @@ jobs:
           Copy-Item "revival/notes/phase2b9c1-physical-smoke-2026-08-20.md" "$kit/README-2B9C1-physical-smoke.md"
           Copy-Item "revival/notes/phase2b9c2-frame-sync-anatomy.md" "$kit/README-2B9C2-frame-sync.md"
           Copy-Item "revival/notes/phase2b10a-hybrid-ractiv-refiner.md" "$kit/README-2B10A-hybrid-refiner.md"
+          Copy-Item "revival/notes/phase2b10b-shadow-stereo.md" "$kit/README-2B10B-shadow-stereo.md"
+          Copy-Item "revival/notes/phase2b10c-counterfactual-promotion-gate.md" "$kit/README-2B10C-counterfactual-gate.md"
 
           Get-ChildItem -Recurse $kit | Select-Object FullName,Length | Format-Table -AutoSize
 
-      - name: Upload Phase 2B.10A hybrid refiner diagnostic kit
+      - name: Upload Phase 2B.10C counterfactual gate diagnostic kit
         uses: actions/upload-artifact@v4
         with:
-          name: touchplus-phase2b10a-hybrid-refiner-windows
-          path: build/touchplus-phase2b10a-hybrid-refiner/**
+          name: touchplus-phase2b10c-counterfactual-gate-windows
+          path: build/touchplus-phase2b10c-counterfactual-gate/**
           if-no-files-found: error
           retention-days: 30

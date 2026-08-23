@@ -1,15 +1,16 @@
 #pragma once
 
-// Phase 2B.10B shadow-only hybrid layer.
+// Phase 2B.10C counterfactual promotion-gate layer.
 //
 // Keep the accepted Phase 2B.9C.2 tracker and all metric/stereo behavior intact.
 // The Ractiv-inspired full-resolution distal refiner is physically validated as
-// a useful 2D diagnostic. In 2B.10B its accepted point is ALSO evaluated through
-// the same robust Touch+ stereo primitives in parallel, but the B result remains
-// telemetry only and MUST NOT replace A, alter smoothing, surface XYZ/H, contact
-// semantics, or enable any OS output.
+// a useful 2D diagnostic. B is evaluated through the same robust Touch+ stereo
+// primitives in parallel. 2B.10C may additionally report WOULD_SELECT_B under a
+// strict gate, but B remains telemetry only and MUST NOT replace A, alter
+// smoothing, surface XYZ/H, contact semantics, or enable any OS output.
 
 #include "depth_surface_frame_runtime.h"
+#include "fingertip_promotion_gate_v10c.h"
 #include "fingertip_refiner_v10.h"
 #include "fingertip_stereo_shadow_v10b.h"
 
@@ -21,6 +22,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <iomanip>
@@ -39,6 +41,8 @@ struct RuntimeStateV10 {
     std::vector<std::uint8_t> background_left;
     touchplus::tracking::DistalRefineResultV10 last{};
     touchplus::tracking::ShadowStereoResultV10B shadow{};
+    touchplus::tracking::PromotionGateResultV10C gate{};
+    bool gate_has_result = false;
     std::uint64_t attempts = 0;
     std::uint64_t accepts = 0;
     std::uint64_t shadow_attempts = 0;
@@ -46,6 +50,12 @@ struct RuntimeStateV10 {
     std::uint64_t both_valid = 0;
     std::uint64_t a_only_valid = 0;
     std::uint64_t b_only_valid = 0;
+    std::uint64_t gate_evaluations = 0;
+    std::uint64_t gate_keep_a = 0;
+    std::uint64_t gate_would_select_b = 0;
+    std::array<std::uint64_t,
+        static_cast<std::size_t>(touchplus::tracking::PromotionReasonV10C::Count)>
+        gate_reason_counts{};
     std::uint64_t report_counter = 0;
 };
 
@@ -64,6 +74,8 @@ inline void start_background(RuntimeStateV10& s) {
     s.background_left.clear();
     s.last = {};
     s.shadow = {};
+    s.gate = {};
+    s.gate_has_result = false;
     s.attempts = 0;
     s.accepts = 0;
     s.shadow_attempts = 0;
@@ -71,9 +83,14 @@ inline void start_background(RuntimeStateV10& s) {
     s.both_valid = 0;
     s.a_only_valid = 0;
     s.b_only_valid = 0;
+    s.gate_evaluations = 0;
+    s.gate_keep_a = 0;
+    s.gate_would_select_b = 0;
+    s.gate_reason_counts.fill(0);
     std::cout
-        << "[HYBRID] 2B.10B refiner background learning started | "
-        << "shadow_ab=1 authoritative=A metric_output_unchanged=1 OS_INJECTION=DISABLED\n";
+        << "[HYBRID] 2B.10C refiner background learning started | "
+        << "counterfactual_gate=1 authoritative=A metric_output_unchanged=1 "
+        << "OS_INJECTION=DISABLED\n";
 }
 
 inline void maybe_start_background(RuntimeStateV10& s) {
@@ -115,9 +132,84 @@ inline void accumulate_background(
     s.background_learning = false;
     s.background_ready = true;
     std::cout
-        << "[HYBRID] 2B.10B refiner background READY | frames="
+        << "[HYBRID] 2B.10C refiner background READY | frames="
         << s.background_frames
-        << " | A remains authoritative; B stereo is shadow telemetry only.\n";
+        << " | A remains authoritative; WOULD_SELECT_B is telemetry only.\n";
+}
+
+inline bool modern_identity_stale_v10c(
+    const touchplus::depth::tracking_runtime_detail::RuntimeState& modern) {
+
+    const auto& observation = modern.tracker.last_anatomy_observation();
+    const auto& anatomy = modern.tracker.last_anatomy_decision();
+    return observation.status == touchplus::tracking::AnatomyStatusV9::Stale ||
+        anatomy.stale ||
+        anatomy.sync_status == touchplus::tracking::AnatomySyncStatusV9::TooOld;
+}
+
+inline bool modern_identity_current_v10c(
+    const touchplus::depth::tracking_runtime_detail::RuntimeState& modern) {
+
+    const auto& anatomy = modern.tracker.last_anatomy_decision();
+    const bool sync_current =
+        anatomy.sync_status == touchplus::tracking::AnatomySyncStatusV9::CurrentFrame ||
+        anatomy.sync_status == touchplus::tracking::AnatomySyncStatusV9::MotionCompensated;
+    return anatomy.publish &&
+        anatomy.state == touchplus::tracking::AnatomyTrackStateV9::Locked &&
+        !anatomy.stale && !anatomy.explicit_reject && !anatomy.jump_rejected &&
+        sync_current;
+}
+
+inline void evaluate_and_record_gate_v10c(
+    RuntimeStateV10& hybrid,
+    const touchplus::depth::tracking_runtime_detail::RuntimeState& modern) {
+
+    const auto& fusion = modern.tracker.last_fusion();
+    const auto& a = modern.result;
+    const auto& r = hybrid.last;
+    const auto& b = hybrid.shadow;
+
+    touchplus::tracking::PromotionGateInputV10C input;
+    input.identity_stale = modern_identity_stale_v10c(modern);
+    input.identity_accepted = fusion.publish && fusion.identity_id != 0 &&
+        touchplus::tracking::promotion_confidence_rank_v10c(
+            modern.tracker.identity_confidence()) > 0;
+    input.identity_current = modern_identity_current_v10c(modern);
+    input.refiner_accepted = r.accepted &&
+        r.status == touchplus::tracking::DistalRefineStatusV10::Accepted;
+    input.refiner_inward =
+        r.status == touchplus::tracking::DistalRefineStatusV10::MovedTowardPalm ||
+        (r.accepted && (!std::isfinite(r.forward_px) || r.forward_px < 0.0));
+    input.a_valid = a.fingertip_valid;
+    input.b_valid = b.valid;
+    input.a_pixel_x = a.pixel_x;
+    input.a_pixel_y = a.pixel_y;
+    input.b_pixel_x = b.pixel_x;
+    input.b_pixel_y = b.pixel_y;
+    input.a_stereo_confidence = modern.tracker.stereo_confidence();
+    input.b_stereo_confidence = b.stereo_confidence;
+    input.a_support = a.refinement_support;
+    input.b_support = b.refinement_support;
+    input.a_x_mm = a.raw_tip.x_mm;
+    input.a_y_mm = a.raw_tip.y_mm;
+    input.a_h_mm = a.raw_tip.h_mm;
+    input.b_x_mm = b.raw_tip.x_mm;
+    input.b_y_mm = b.raw_tip.y_mm;
+    input.b_h_mm = b.raw_tip.h_mm;
+
+    hybrid.gate = touchplus::tracking::evaluate_promotion_gate_v10c(input);
+    hybrid.gate_has_result = true;
+    ++hybrid.gate_evaluations;
+    if (hybrid.gate.decision ==
+        touchplus::tracking::PromotionDecisionV10C::WouldSelectB) {
+        ++hybrid.gate_would_select_b;
+    } else {
+        ++hybrid.gate_keep_a;
+    }
+    const auto reason_index = static_cast<std::size_t>(hybrid.gate.reason);
+    if (reason_index < hybrid.gate_reason_counts.size()) {
+        ++hybrid.gate_reason_counts[reason_index];
+    }
 }
 
 inline void overlay_refined_candidate(
@@ -153,7 +245,7 @@ inline void overlay_refined_candidate(
 
 inline void run_refiner(
     RuntimeStateV10& hybrid,
-    touchplus::depth::tracking_runtime_detail::RuntimeState& modern,
+    const touchplus::depth::tracking_runtime_detail::RuntimeState& modern,
     const Calibration& calibration,
     const std::vector<std::uint8_t>& left_gray,
     const std::vector<std::uint8_t>& right_gray,
@@ -162,6 +254,8 @@ inline void run_refiner(
 
     hybrid.last = {};
     hybrid.shadow = {};
+    hybrid.gate = {};
+    hybrid.gate_has_result = false;
     if (hybrid.background_learning) {
         accumulate_background(hybrid, left_gray);
         return;
@@ -178,6 +272,7 @@ inline void run_refiner(
     // modern fused identity. It can never invent/reacquire a fingertip itself.
     if (!fusion.publish || fusion.pixel_x < 0 || fusion.pixel_y < 0 ||
         !identity.palm_valid || mask.empty()) {
+        evaluate_and_record_gate_v10c(hybrid, modern);
         return;
     }
 
@@ -203,7 +298,10 @@ inline void run_refiner(
         anatomy.axis_dx,
         anatomy.axis_dy);
 
-    if (!hybrid.last.accepted) return;
+    if (!hybrid.last.accepted) {
+        evaluate_and_record_gate_v10c(hybrid, modern);
+        return;
+    }
 
     ++hybrid.accepts;
     overlay_refined_candidate(heatmap_bgra, hybrid.last);
@@ -230,6 +328,10 @@ inline void run_refiner(
     if (a_valid && b_valid) ++hybrid.both_valid;
     else if (a_valid) ++hybrid.a_only_valid;
     else if (b_valid) ++hybrid.b_only_valid;
+
+    // Counterfactual only: record the decision without touching modern.result,
+    // smoothing, official XYZ/H, contact state, or any runtime output.
+    evaluate_and_record_gate_v10c(hybrid, modern);
 }
 
 inline void maybe_report(RuntimeStateV10& hybrid) {
@@ -238,18 +340,18 @@ inline void maybe_report(RuntimeStateV10& hybrid) {
 
     if (hybrid.background_learning) {
         std::cout
-            << "[HYBRID] heartbeat | mode=2B.10B_SHADOW_AB"
+            << "[HYBRID] heartbeat | mode=2B.10C_COUNTERFACTUAL_GATE"
             << " | background=LEARNING "
             << hybrid.background_frames << "/"
             << touchplus::tracking::kV5BackgroundFrames
-            << " | authoritative=A B_output=DISABLED\n";
+            << " | authoritative=A B_output=DISABLED OS_INJECTION=DISABLED\n";
         return;
     }
     if (!hybrid.background_ready) {
         std::cout
-            << "[HYBRID] heartbeat | mode=2B.10B_SHADOW_AB"
+            << "[HYBRID] heartbeat | mode=2B.10C_COUNTERFACTUAL_GATE"
             << " | background=NOT_READY | press B with clear still scene"
-            << " | authoritative=A B_output=DISABLED\n";
+            << " | authoritative=A B_output=DISABLED OS_INJECTION=DISABLED\n";
         return;
     }
 
@@ -260,7 +362,7 @@ inline void maybe_report(RuntimeStateV10& hybrid) {
 
     std::cout
         << std::fixed << std::setprecision(1)
-        << "[HYBRID] heartbeat | mode=2B.10B_SHADOW_AB"
+        << "[HYBRID] heartbeat | mode=2B.10C_COUNTERFACTUAL_GATE"
         << " | refiner="
         << touchplus::tracking::distal_refine_status_name_v10(r.status)
         << " | coarse=" << r.coarse_x << "," << r.coarse_y
@@ -300,12 +402,46 @@ inline void maybe_report(RuntimeStateV10& hybrid) {
             << ",dH=" << dh << ",dXYZ=" << dxyz << ")";
     }
 
+    if (hybrid.gate_has_result) {
+        std::cout
+            << " | gate="
+            << touchplus::tracking::promotion_decision_name_v10c(
+                hybrid.gate.decision)
+            << " reason="
+            << touchplus::tracking::promotion_reason_name_v10c(
+                hybrid.gate.reason)
+            << " gate_shift_px=" << hybrid.gate.shift_2d_px
+            << " gate_dH=" << hybrid.gate.delta_h_mm
+            << " gate_dXYZ=" << hybrid.gate.delta_xyz_mm;
+    } else {
+        std::cout << " | gate=NOT_EVALUATED";
+    }
+
     std::cout
         << " | counts refine=" << hybrid.accepts << "/" << hybrid.attempts
         << " shadow=" << hybrid.shadow_valid << "/" << hybrid.shadow_attempts
         << " both=" << hybrid.both_valid
         << " A_only=" << hybrid.a_only_valid
         << " B_only=" << hybrid.b_only_valid
+        << " gate=" << hybrid.gate_would_select_b << "/"
+        << hybrid.gate_evaluations
+        << " KEEP_A=" << hybrid.gate_keep_a
+        << " WOULD_SELECT_B=" << hybrid.gate_would_select_b
+        << " reasons={";
+
+    bool first_reason = true;
+    for (std::size_t i = 0; i < hybrid.gate_reason_counts.size(); ++i) {
+        if (hybrid.gate_reason_counts[i] == 0) continue;
+        if (!first_reason) std::cout << ",";
+        first_reason = false;
+        std::cout
+            << touchplus::tracking::promotion_reason_name_v10c(
+                static_cast<touchplus::tracking::PromotionReasonV10C>(i))
+            << ":" << hybrid.gate_reason_counts[i];
+    }
+
+    std::cout
+        << "}"
         << " | authoritative=A metric_output=UNCHANGED OS_INJECTION=DISABLED\n";
 }
 

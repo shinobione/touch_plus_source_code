@@ -10,11 +10,15 @@ add_executable(touchplus_fingertip_fusion_selftest
 add_executable(touchplus_fingertip_refiner_selftest
     ../src/fingertip_refiner_v10_selftest.cpp
 )
+add_executable(touchplus_fingertip_promotion_gate_selftest
+    ../src/fingertip_promotion_gate_v10c_selftest.cpp
+)
 
 foreach(target
         touchplus_fingertip_tracker_selftest
         touchplus_fingertip_fusion_selftest
-        touchplus_fingertip_refiner_selftest)
+        touchplus_fingertip_refiner_selftest
+        touchplus_fingertip_promotion_gate_selftest)
     target_compile_features(${target} PRIVATE cxx_std_20)
     target_compile_definitions(${target} PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX

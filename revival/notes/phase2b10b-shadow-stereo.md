@@ -90,7 +90,7 @@ No obviously wrong finite MEDIUM/HIGH shadow fingertip was observed during this 
 
 The 2B.10B implementation CI was green before the physical smoke. Subsequent documentation/governance commits do not alter the runtime boundary described above.
 
-## Next gate — 2B.10C counterfactual promotion selector
+## Follow-up gate — 2B.10C counterfactual promotion selector
 
 The next minimal slice should remain non-authoritative and produce only:
 
@@ -111,3 +111,7 @@ Hard rules for 2B.10C:
 - the later physical gate inspects only `WOULD_SELECT_B` cases.
 
 Phase 2C remains paused. OS injection remains disabled.
+
+The diagnostic-only 2B.10C implementation is documented in:
+
+`revival/notes/phase2b10c-counterfactual-promotion-gate.md`

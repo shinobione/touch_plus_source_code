@@ -47,7 +47,9 @@ B_only                     = 2
 
 Verdict: **PHYSICAL PASS / PROMISING**. A remains authoritative. B remains shadow-only.
 
-The next minimal slice is **Phase 2B.10C — counterfactual promotion gate**. It must not promote B into runtime output. It should only compute whether a frame would have selected B under a strict gate.
+The active implementation slice is **Phase 2B.10C — counterfactual promotion gate**. It does not promote B into runtime output. It only computes whether a frame would have selected B under a strict gate and reports `KEEP_A` or `WOULD_SELECT_B` with explicit reason counters.
+
+The selector uses a conservative dominance rule: B confidence and support may not regress, at least one must improve strictly, `B_only` is ineligible, 2D movement is bounded to 18 px, and coherent raw metric deltas are bounded to 18 mm in XYZ and 12 mm in H. Exact-head PR/CI state must still be fetched live before any physical evaluation.
 
 Before continuing, fetch the current PR #14 body and exact head SHA; do not rely on a head recorded in an old chat.
 
