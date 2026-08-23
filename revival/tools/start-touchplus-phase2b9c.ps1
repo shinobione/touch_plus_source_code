@@ -188,7 +188,7 @@ finally {
 
 if (Test-Path $stderr) {
     $err = Get-Content $stderr -Raw
-    if ($err.Trim()) {
+    if (-not [string]::IsNullOrWhiteSpace($err)) {
         Write-Host "[2B.9C] Sidecar stderr:" -ForegroundColor Yellow
         Write-Host $err
     }
