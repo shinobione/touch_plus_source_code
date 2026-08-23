@@ -2,6 +2,7 @@ param(
     [string]$Python = "python",
     [string]$Assets = ".\landmark-assets",
     [string]$Venv = ".\.touchplus-landmark-venv",
+    [string]$BenchCache = $env:TOUCHPLUS_BENCH_CACHE,
     [switch]$SkipSetup,
     [switch]$EnableHybridPromotion,
     [switch]$SelfTestQuoting
@@ -40,6 +41,34 @@ function Start-QuotedPythonProcess(
         -RedirectStandardError $StderrPath `
         -PassThru `
         -WindowStyle Hidden
+}
+
+function Mount-BenchCacheDirectory([string]$Name) {
+    if ([string]::IsNullOrWhiteSpace($BenchCache)) { return }
+
+    $cacheRoot = if ([System.IO.Path]::IsPathRooted($BenchCache)) {
+        $BenchCache
+    }
+    else {
+        Join-Path $root $BenchCache
+    }
+    $source = Join-Path $cacheRoot $Name
+    $destination = Join-Path $root $Name
+
+    if (Test-Path $destination) { return }
+    if (-not (Test-Path $source)) {
+        Write-Host "[BENCH CACHE] Missing cached directory: $source" -ForegroundColor Yellow
+        return
+    }
+
+    try {
+        New-Item -ItemType Junction -Path $destination -Target $source -ErrorAction Stop | Out-Null
+        Write-Host "[BENCH CACHE] Mounted $Name -> $source" -ForegroundColor DarkCyan
+    }
+    catch {
+        Write-Host "[BENCH CACHE] Junction unavailable for $Name; copying cached directory once..." -ForegroundColor Yellow
+        Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+    }
 }
 
 if ($SelfTestQuoting) {
@@ -90,6 +119,14 @@ print("PHASE 2B.9C LAUNCHER QUOTING SELF-TEST: PASS")
 $tracker = Join-Path $root "touchplus_phase2b_tracker.exe"
 $sidecar = Join-Path $root "touchplus_landmark_sidecar_live.py"
 $setup = Join-Path $root "setup-touchplus-landmark-probe.ps1"
+
+# Optional reusable local bench cache. The cache itself is never committed.
+# When configured, fresh GitHub artifacts can mount the heavy venv, model
+# assets and per-setup surface frame automatically instead of asking the user
+# to copy the same three directories into every extracted kit.
+Mount-BenchCacheDirectory ".touchplus-landmark-venv"
+Mount-BenchCacheDirectory "landmark-assets"
+Mount-BenchCacheDirectory "surface"
 
 $venvPath = if ([System.IO.Path]::IsPathRooted($Venv)) { $Venv } else { Join-Path $root $Venv }
 $assetsPath = if ([System.IO.Path]::IsPathRooted($Assets)) { $Assets } else { Join-Path $root $Assets }
