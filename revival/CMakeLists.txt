@@ -139,6 +139,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         src/depth_surface_frame.h
         src/depth_surface_frame_runtime.h
         src/depth_surface_frame_runtime_v10.h
+        src/fingertip_authoritative_selection_v10d.h
         src/fingertip_promotion_gate_v10c.h
         src/fingertip_refiner_v10.h
         src/fingertip_stereo_shadow_v10b.h
@@ -153,8 +154,8 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
     # Preserve the accepted Phase 1C/2A/2B composite runtime, then layer the
-    # Phase 2B.10C counterfactual promotion gate in diagnostic-only mode. The
-    # layer may report WOULD_SELECT_B but never replaces A or mutates output.
+    # Phase 2B.10D authoritative selector behind explicit runtime opt-in. Its
+    # absence leaves the accepted A result and smoothing path unchanged.
     if(MSVC)
         target_compile_options(touchplus_depth_viewer PRIVATE
             "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_surface_frame_runtime_v10.h"

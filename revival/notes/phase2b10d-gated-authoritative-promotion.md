@@ -4,7 +4,10 @@ Date: 2026-08-23
 
 ## Status
 
-Design boundary for the next experimental slice after the physical PASS of 2B.10C.
+Implemented on `revival/phase2b10d-gated-promotion` as an experimental,
+explicit-opt-in slice. Local synthetic regressions and the real Win32 runtime
+build pass. Exact-head CI and the promotion-enabled physical smoke remain
+required; this status is not a physical acceptance.
 
 PR #14 merged the physically validated 2B.10A/10B/10C hybrid-refiner diagnostics into `revival/main` at:
 
@@ -64,6 +67,16 @@ HYBRID_PROMOTION=ENABLED    # explicit bench-only opt-in
 
 Do not make promotion sticky across launches.
 
+Implemented runtime control:
+
+```powershell
+.\touchplus_phase2b_tracker.exe --enable-hybrid-promotion
+```
+
+Without `--enable-hybrid-promotion`, startup reports
+`promotion_mode=DISABLED` and the accepted A result/smoothing path is not
+mutated by the 2B.10D layer. The flag is process-local and is not persisted.
+
 ## Authoritative selection boundary
 
 Promotion should occur only after A and B have independently completed their existing same-frame stereo evaluation and after `evaluate_promotion_gate_v10c(...)` returns `WOULD_SELECT_B`.
@@ -104,6 +117,38 @@ source_switches
 ```
 
 A source switch is diagnostic evidence only; it must never reset/reacquire finger identity.
+
+The runtime reports these counts cumulatively for the current refiner
+background-learning session and resets them only when a new refiner background
+capture is explicitly started.
+
+## Implemented selection boundary
+
+- `evaluate_promotion_gate_v10c(...)` and all 2B.10C thresholds are unchanged;
+- source selection copies pixel, raw `Xsurface/Ysurface/H`, stereo confidence
+  and support as one atomic A-or-B sample;
+- OFF performs no write to the accepted `modern.result` or its accepted A
+  smoothing path;
+- ON uses a separate selected-sample smoother, reset on identity loss/change;
+- B cannot create or reacquire identity because selection still requires the
+  current published modern identity and the unchanged 2B.10C gate;
+- OS injection remains compile-time disabled for this slice.
+
+## Local verification
+
+Passed in both x64 and Win32:
+
+- V8 temporal palm/branch identity self-test;
+- V9 / 2B.9C.2 frame-synchronous fusion self-test;
+- 2B.10A distal refiner self-test;
+- unchanged 2B.10C promotion-gate self-test;
+- 2B.10D gated authoritative selection self-test.
+
+Also passed:
+
+- Phase 2A surface-frame regression in x64 and Win32;
+- Phase 1C calibration/Q self-test in Win32 with promotion OFF and ON;
+- full Win32 Revival build, including `touchplus_depth_viewer.exe`.
 
 ## Synthetic regression
 

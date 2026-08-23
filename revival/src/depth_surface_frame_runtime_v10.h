@@ -1,15 +1,16 @@
 #pragma once
 
-// Phase 2B.10C counterfactual promotion-gate layer.
+// Phase 2B.10D gated authoritative promotion layer.
 //
 // Keep the accepted Phase 2B.9C.2 tracker and all metric/stereo behavior intact.
 // The Ractiv-inspired full-resolution distal refiner is physically validated as
 // a useful 2D diagnostic. B is evaluated through the same robust Touch+ stereo
-// primitives in parallel. 2B.10C may additionally report WOULD_SELECT_B under a
-// strict gate, but B remains telemetry only and MUST NOT replace A, alter
-// smoothing, surface XYZ/H, contact semantics, or enable any OS output.
+// primitives in parallel. The unchanged 2B.10C gate may promote one complete B
+// pixel/raw-metric sample, but only behind explicit runtime opt-in. Default mode
+// leaves the accepted A result and smoothing path unchanged.
 
 #include "depth_surface_frame_runtime.h"
+#include "fingertip_authoritative_selection_v10d.h"
 #include "fingertip_promotion_gate_v10c.h"
 #include "fingertip_refiner_v10.h"
 #include "fingertip_stereo_shadow_v10b.h"
@@ -23,6 +24,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <iomanip>
@@ -31,6 +33,19 @@
 
 namespace touchplus::depth {
 namespace hybrid_refiner_runtime_detail_v10 {
+
+inline std::atomic<bool>& promotion_enabled_config_v10d() {
+    static std::atomic<bool> value{false};
+    return value;
+}
+
+inline bool promotion_enabled_v10d() {
+    return promotion_enabled_config_v10d().load(std::memory_order_acquire);
+}
+
+inline const char* promotion_mode_name_v10d() {
+    return promotion_enabled_v10d() ? "ENABLED" : "DISABLED";
+}
 
 struct RuntimeStateV10 {
     bool previous_b_down = false;
@@ -43,6 +58,12 @@ struct RuntimeStateV10 {
     touchplus::tracking::ShadowStereoResultV10B shadow{};
     touchplus::tracking::PromotionGateResultV10C gate{};
     bool gate_has_result = false;
+    touchplus::tracking::TrackingResult accepted_a{};
+    touchplus::tracking::AuthoritativeSelectionV10D selection{};
+    bool selection_has_result = false;
+    touchplus::tracking::PromotionSmootherV10D promotion_smoother{};
+    touchplus::tracking::PromotionSelectionStatsV10D selection_stats{};
+    std::uint64_t selection_identity_id = 0;
     std::uint64_t attempts = 0;
     std::uint64_t accepts = 0;
     std::uint64_t shadow_attempts = 0;
@@ -76,6 +97,12 @@ inline void start_background(RuntimeStateV10& s) {
     s.shadow = {};
     s.gate = {};
     s.gate_has_result = false;
+    s.accepted_a = {};
+    s.selection = {};
+    s.selection_has_result = false;
+    s.promotion_smoother = {};
+    s.selection_stats = {};
+    s.selection_identity_id = 0;
     s.attempts = 0;
     s.accepts = 0;
     s.shadow_attempts = 0;
@@ -88,8 +115,8 @@ inline void start_background(RuntimeStateV10& s) {
     s.gate_would_select_b = 0;
     s.gate_reason_counts.fill(0);
     std::cout
-        << "[HYBRID] 2B.10C refiner background learning started | "
-        << "counterfactual_gate=1 authoritative=A metric_output_unchanged=1 "
+        << "[HYBRID] 2B.10D refiner background learning started | "
+        << "promotion_mode=" << promotion_mode_name_v10d() << " "
         << "OS_INJECTION=DISABLED\n";
 }
 
@@ -132,9 +159,11 @@ inline void accumulate_background(
     s.background_learning = false;
     s.background_ready = true;
     std::cout
-        << "[HYBRID] 2B.10C refiner background READY | frames="
+        << "[HYBRID] 2B.10D refiner background READY | frames="
         << s.background_frames
-        << " | A remains authoritative; WOULD_SELECT_B is telemetry only.\n";
+        << " | promotion_mode=" << promotion_mode_name_v10d()
+        << " | authoritative_default=A"
+        << " | OS_INJECTION=DISABLED\n";
 }
 
 inline bool modern_identity_stale_v10c(
@@ -160,12 +189,97 @@ inline bool modern_identity_current_v10c(
         sync_current;
 }
 
-inline void evaluate_and_record_gate_v10c(
+inline touchplus::tracking::AuthoritativeSampleV10D sample_from_a_v10d(
+    const touchplus::tracking::TrackingResult& a,
+    const std::string& stereo_confidence) {
+    return {
+        a.fingertip_valid,
+        a.pixel_x,
+        a.pixel_y,
+        a.raw_tip.x_mm,
+        a.raw_tip.y_mm,
+        a.raw_tip.h_mm,
+        stereo_confidence,
+        a.refinement_support
+    };
+}
+
+inline touchplus::tracking::AuthoritativeSampleV10D sample_from_b_v10d(
+    const touchplus::tracking::ShadowStereoResultV10B& b) {
+    return {
+        b.valid,
+        b.pixel_x,
+        b.pixel_y,
+        b.raw_tip.x_mm,
+        b.raw_tip.y_mm,
+        b.raw_tip.h_mm,
+        b.stereo_confidence,
+        b.refinement_support
+    };
+}
+
+inline void reset_promotion_smoother_v10d(RuntimeStateV10& hybrid) {
+    hybrid.promotion_smoother = {};
+    hybrid.selection_identity_id = 0;
+}
+
+inline void apply_authoritative_selection_v10d(
     RuntimeStateV10& hybrid,
-    const touchplus::depth::tracking_runtime_detail::RuntimeState& modern) {
+    touchplus::depth::tracking_runtime_detail::RuntimeState& modern) {
+
+    const bool enabled = promotion_enabled_v10d();
+    const auto a = sample_from_a_v10d(
+        hybrid.accepted_a, modern.tracker.stereo_confidence());
+    const auto b = sample_from_b_v10d(hybrid.shadow);
+    hybrid.selection = touchplus::tracking::select_authoritative_sample_v10d(
+        enabled, hybrid.gate, a, b);
+    hybrid.selection_has_result = true;
+    touchplus::tracking::record_authoritative_selection_v10d(
+        hybrid.selection.source, hybrid.selection_stats);
+
+    // OFF is deliberately a no-op on the accepted result and accepted tracker
+    // smoothing state. The experimental smoother exists only in explicit ON
+    // mode and consumes the same complete source sample selected above.
+    if (!enabled) return;
 
     const auto& fusion = modern.tracker.last_fusion();
-    const auto& a = modern.result;
+    if (!hybrid.selection.sample.valid || !fusion.publish ||
+        fusion.identity_id == 0) {
+        reset_promotion_smoother_v10d(hybrid);
+        return;
+    }
+    if (hybrid.selection_identity_id != fusion.identity_id) {
+        hybrid.promotion_smoother = {};
+        hybrid.selection_identity_id = fusion.identity_id;
+    }
+    if (!touchplus::tracking::consume_selected_sample_v10d(
+            true, hybrid.selection.sample, hybrid.promotion_smoother)) {
+        reset_promotion_smoother_v10d(hybrid);
+        return;
+    }
+
+    const auto& selected = hybrid.selection.sample;
+    modern.result.pixel_x = selected.pixel_x;
+    modern.result.pixel_y = selected.pixel_y;
+    modern.result.raw_tip.x_mm = selected.x_mm;
+    modern.result.raw_tip.y_mm = selected.y_mm;
+    modern.result.raw_tip.h_mm = selected.h_mm;
+    modern.result.smoothed_tip.x_mm = hybrid.promotion_smoother.x_mm;
+    modern.result.smoothed_tip.y_mm = hybrid.promotion_smoother.y_mm;
+    modern.result.smoothed_tip.h_mm = hybrid.promotion_smoother.h_mm;
+    modern.result.refinement_support = selected.support;
+    modern.result.fingertip_valid = true;
+    modern.result.confidence =
+        modern.tracker.identity_confidence() == "HIGH" &&
+        selected.stereo_confidence == "HIGH" ? "HIGH" : "MEDIUM";
+}
+
+inline void evaluate_and_record_gate_v10c(
+    RuntimeStateV10& hybrid,
+    touchplus::depth::tracking_runtime_detail::RuntimeState& modern) {
+
+    const auto& fusion = modern.tracker.last_fusion();
+    const auto& a = hybrid.accepted_a;
     const auto& r = hybrid.last;
     const auto& b = hybrid.shadow;
 
@@ -210,6 +324,7 @@ inline void evaluate_and_record_gate_v10c(
     if (reason_index < hybrid.gate_reason_counts.size()) {
         ++hybrid.gate_reason_counts[reason_index];
     }
+    apply_authoritative_selection_v10d(hybrid, modern);
 }
 
 inline void overlay_refined_candidate(
@@ -245,7 +360,7 @@ inline void overlay_refined_candidate(
 
 inline void run_refiner(
     RuntimeStateV10& hybrid,
-    const touchplus::depth::tracking_runtime_detail::RuntimeState& modern,
+    touchplus::depth::tracking_runtime_detail::RuntimeState& modern,
     const Calibration& calibration,
     const std::vector<std::uint8_t>& left_gray,
     const std::vector<std::uint8_t>& right_gray,
@@ -256,6 +371,9 @@ inline void run_refiner(
     hybrid.shadow = {};
     hybrid.gate = {};
     hybrid.gate_has_result = false;
+    hybrid.accepted_a = modern.result;
+    hybrid.selection = {};
+    hybrid.selection_has_result = false;
     if (hybrid.background_learning) {
         accumulate_background(hybrid, left_gray);
         return;
@@ -306,9 +424,9 @@ inline void run_refiner(
     ++hybrid.accepts;
     overlay_refined_candidate(heatmap_bgra, hybrid.last);
 
-    // 2B.10B SHADOW ONLY: run B through the same robust stereo primitives used
-    // by the accepted tracker. The returned point is never written into modern
-    // tracker state, smoothing, runtime.result, cursor depth, contact, or output.
+    // Evaluate B independently through the same robust stereo primitives used
+    // by A. It remains ineligible until the unchanged gate and explicit 10D
+    // runtime opt-in both allow one coherent same-frame sample.
     ++hybrid.shadow_attempts;
     const auto& surface = touchplus::surface::live_surface_model();
     hybrid.shadow = touchplus::tracking::evaluate_shadow_stereo_v10b(
@@ -322,15 +440,15 @@ inline void run_refiner(
         hybrid.last.refined_y,
         modern.tracker.identity_confidence());
 
-    const bool a_valid = modern.result.fingertip_valid;
+    const bool a_valid = hybrid.accepted_a.fingertip_valid;
     const bool b_valid = hybrid.shadow.valid;
     if (b_valid) ++hybrid.shadow_valid;
     if (a_valid && b_valid) ++hybrid.both_valid;
     else if (a_valid) ++hybrid.a_only_valid;
     else if (b_valid) ++hybrid.b_only_valid;
 
-    // Counterfactual only: record the decision without touching modern.result,
-    // smoothing, official XYZ/H, contact state, or any runtime output.
+    // 2B.10D selection happens only after both same-frame candidates and the
+    // unchanged 2B.10C gate have been evaluated.
     evaluate_and_record_gate_v10c(hybrid, modern);
 }
 
@@ -340,39 +458,42 @@ inline void maybe_report(RuntimeStateV10& hybrid) {
 
     if (hybrid.background_learning) {
         std::cout
-            << "[HYBRID] heartbeat | mode=2B.10C_COUNTERFACTUAL_GATE"
+            << "[HYBRID] heartbeat | mode=2B.10D_GATED_PROMOTION"
             << " | background=LEARNING "
             << hybrid.background_frames << "/"
             << touchplus::tracking::kV5BackgroundFrames
-            << " | authoritative=A B_output=DISABLED OS_INJECTION=DISABLED\n";
+            << " | promotion_mode=" << promotion_mode_name_v10d()
+            << " selected_source=A OS_INJECTION=DISABLED\n";
         return;
     }
     if (!hybrid.background_ready) {
         std::cout
-            << "[HYBRID] heartbeat | mode=2B.10C_COUNTERFACTUAL_GATE"
+            << "[HYBRID] heartbeat | mode=2B.10D_GATED_PROMOTION"
             << " | background=NOT_READY | press B with clear still scene"
-            << " | authoritative=A B_output=DISABLED OS_INJECTION=DISABLED\n";
+            << " | promotion_mode=" << promotion_mode_name_v10d()
+            << " selected_source=A OS_INJECTION=DISABLED\n";
         return;
     }
 
     auto& modern = touchplus::depth::tracking_runtime_detail::state();
-    const auto& a = modern.result;
+    const auto& a = hybrid.accepted_a;
     const auto& r = hybrid.last;
     const auto& b = hybrid.shadow;
 
     std::cout
         << std::fixed << std::setprecision(1)
-        << "[HYBRID] heartbeat | mode=2B.10C_COUNTERFACTUAL_GATE"
+        << "[HYBRID] heartbeat | mode=2B.10D_GATED_PROMOTION"
+        << " | promotion_mode=" << promotion_mode_name_v10d()
         << " | refiner="
         << touchplus::tracking::distal_refine_status_name_v10(r.status)
         << " | coarse=" << r.coarse_x << "," << r.coarse_y
         << " refined=" << r.refined_x << "," << r.refined_y
-        << " shift_px=" << r.shift_px
+        << " refiner_shift_px=" << r.shift_px
         << " forward_px=" << r.forward_px
         << " lateral_px=" << r.lateral_px
         << " | A=" << (a.fingertip_valid ? "VALID" : "INVALID")
-        << "/" << modern.tracker.stereo_confidence()
-        << " support=" << a.refinement_support;
+        << " A_confidence=" << modern.tracker.stereo_confidence()
+        << " A_support=" << a.refinement_support;
 
     if (a.fingertip_valid) {
         std::cout
@@ -382,8 +503,8 @@ inline void maybe_report(RuntimeStateV10& hybrid) {
 
     std::cout
         << " | B=" << (b.valid ? "VALID" : (b.attempted ? "INVALID" : "NOT_RUN"))
-        << "/" << b.stereo_confidence
-        << " support=" << b.refinement_support
+        << " B_confidence=" << b.stereo_confidence
+        << " B_support=" << b.refinement_support
         << " reason=" << b.reason;
 
     if (b.valid) {
@@ -404,17 +525,28 @@ inline void maybe_report(RuntimeStateV10& hybrid) {
 
     if (hybrid.gate_has_result) {
         std::cout
-            << " | gate="
+            << " | promotion_gate="
             << touchplus::tracking::promotion_decision_name_v10c(
                 hybrid.gate.decision)
-            << " reason="
+            << " gate_reason="
             << touchplus::tracking::promotion_reason_name_v10c(
                 hybrid.gate.reason)
-            << " gate_shift_px=" << hybrid.gate.shift_2d_px
-            << " gate_dH=" << hybrid.gate.delta_h_mm
-            << " gate_dXYZ=" << hybrid.gate.delta_xyz_mm;
+            << " shift_px=" << hybrid.gate.shift_2d_px
+            << " dH=" << hybrid.gate.delta_h_mm
+            << " dXYZ=" << hybrid.gate.delta_xyz_mm;
     } else {
-        std::cout << " | gate=NOT_EVALUATED";
+        std::cout << " | promotion_gate=KEEP_A"
+                  << " shift_px=nan dH=nan dXYZ=nan";
+    }
+
+    if (hybrid.selection_has_result) {
+        std::cout
+            << " | selected_source="
+            << touchplus::tracking::authoritative_source_name_v10d(
+                hybrid.selection.source)
+            << " selected_reason=" << hybrid.selection.reason;
+    } else {
+        std::cout << " | selected_source=A selected_reason=GATE_NOT_EVALUATED";
     }
 
     std::cout
@@ -427,6 +559,9 @@ inline void maybe_report(RuntimeStateV10& hybrid) {
         << hybrid.gate_evaluations
         << " KEEP_A=" << hybrid.gate_keep_a
         << " WOULD_SELECT_B=" << hybrid.gate_would_select_b
+        << " selected_A=" << hybrid.selection_stats.selected_a
+        << " selected_B=" << hybrid.selection_stats.selected_b
+        << " source_switches=" << hybrid.selection_stats.source_switches
         << " reasons={";
 
     bool first_reason = true;
@@ -442,10 +577,20 @@ inline void maybe_report(RuntimeStateV10& hybrid) {
 
     std::cout
         << "}"
-        << " | authoritative=A metric_output=UNCHANGED OS_INJECTION=DISABLED\n";
+        << " | modern_identity=AUTHORITATIVE"
+        << " OS_INJECTION=DISABLED\n";
 }
 
 } // namespace hybrid_refiner_runtime_detail_v10
+
+inline void set_hybrid_promotion_enabled_v10d(bool enabled) {
+    hybrid_refiner_runtime_detail_v10::promotion_enabled_config_v10d().store(
+        enabled, std::memory_order_release);
+}
+
+inline bool hybrid_promotion_enabled_v10d() {
+    return hybrid_refiner_runtime_detail_v10::promotion_enabled_v10d();
+}
 
 inline void compute_depth_heatmap_hybrid_v10_wrapper(
     const Calibration& c,
@@ -453,7 +598,8 @@ inline void compute_depth_heatmap_hybrid_v10_wrapper(
     const std::vector<uint8_t>& right,
     DepthWorkspace& workspace) {
 
-    // Run the exact accepted 2B.9C.2 implementation first. A is authoritative.
+    // Run the exact accepted implementation first. In default OFF mode no later
+    // operation mutates its A result or smoothing state.
     touchplus::depth::compute_depth_heatmap_fingertip_wrapper(
         c, left, right, workspace);
 
@@ -473,8 +619,8 @@ inline PointDepth point_depth_surface_runtime_hybrid_v10_wrapper(
     auto& hybrid = hybrid_refiner_runtime_detail_v10::state();
     hybrid_refiner_runtime_detail_v10::maybe_start_background(hybrid);
 
-    // Preserve all accepted Phase 2A/2B keyboard handling/reporting and return
-    // exactly A's point-depth result. B is shadow telemetry only.
+    // Preserve all accepted Phase 2A/2B keyboard handling and cursor-depth
+    // behavior. Fingertip promotion never enables contact or OS output.
     PointDepth result = touchplus::depth::point_depth_surface_runtime_wrapper(
         c, left, right, cursor_x, cursor_y);
 
