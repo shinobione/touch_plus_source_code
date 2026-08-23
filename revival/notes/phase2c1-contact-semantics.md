@@ -4,7 +4,8 @@ Date: 2026-08-23
 
 ## Status
 
-Planned implementation slice on `revival/phase2c1-contact-semantics`.
+Implemented on `revival/phase2c1-contact-semantics`; synthetic/CI gates are
+required before the physical handoff. Physical validation remains pending.
 
 Accepted base: `revival/main` after PR #16 / Phase 2B.10D physical PASS and merge at:
 
@@ -148,3 +149,35 @@ Physical review must compare event timing to the actual finger/table contact in 
 ## Merge rule
 
 CI alone is insufficient. Keep the PR Draft until the real Touch+ semantic-contact smoke passes.
+
+## Implementation record
+
+Phase 2C.1 is an isolated deterministic state machine in
+`revival/src/contact_state_machine_v2c1.h`. The accepted runtime feeds it only
+the final already-selected `smoothed_tip` plus the current accepted identity.
+The 2B.10D source is copied as A/B telemetry only; Phase 2C.1 never selects or
+recomputes a source.
+
+Focused self-test coverage lives in
+`revival/src/contact_state_machine_v2c1_selftest.cpp` and is wired for x64 and
+Win32 in `revival/phase2b_test/CMakeLists.txt` and
+`.github/workflows/revival-fingertip.yml`. Runtime transitions use the dedicated
+`[CONTACT_TRANSITION]` prefix, and the periodic line uses `[CONTACT] heartbeat`.
+Both include `OS_INJECTION=DISABLED`.
+
+Local pre-commit gates completed on 2026-08-23:
+
+- V8, V9/2B.9C.2, 2B.10A, 2B.10C, 2B.10D and Phase 2C.1 self-tests: PASS x64 and Win32;
+- real Revival Win32 runtime build: PASS;
+- Phase 2A surface regression: PASS;
+- Phase 1C calibration/Q regression for `0101007379`: PASS.
+
+Exact first-smoke launch command from the unpacked CI artifact:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\start-touchplus-phase2b9c.ps1
+```
+
+The accepted A path remains the default. `-EnableHybridPromotion` is optional
+and is not part of the first Phase 2C.1 smoke. No merge or physical PASS may be
+claimed from these synthetic results.

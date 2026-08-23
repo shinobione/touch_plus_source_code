@@ -10,6 +10,7 @@
 // leaves the accepted A result and smoothing path unchanged.
 
 #include "depth_surface_frame_runtime.h"
+#include "contact_state_machine_v2c1.h"
 #include "fingertip_authoritative_selection_v10d.h"
 #include "fingertip_promotion_gate_v10c.h"
 #include "fingertip_refiner_v10.h"
@@ -64,6 +65,8 @@ struct RuntimeStateV10 {
     touchplus::tracking::PromotionSmootherV10D promotion_smoother{};
     touchplus::tracking::PromotionSelectionStatsV10D selection_stats{};
     std::uint64_t selection_identity_id = 0;
+    touchplus::contact::ContactStateMachineV2C1 contact_machine{};
+    touchplus::contact::ContactOutputV2C1 contact{};
     std::uint64_t attempts = 0;
     std::uint64_t accepts = 0;
     std::uint64_t shadow_attempts = 0;
@@ -327,6 +330,78 @@ inline void evaluate_and_record_gate_v10c(
     apply_authoritative_selection_v10d(hybrid, modern);
 }
 
+inline touchplus::contact::FingertipSourceV2C1 contact_source_v2c1(
+    const RuntimeStateV10& hybrid) {
+
+    if (hybrid.selection_has_result &&
+        hybrid.selection.source ==
+            touchplus::tracking::AuthoritativeSourceV10D::B) {
+        return touchplus::contact::FingertipSourceV2C1::B;
+    }
+    return touchplus::contact::FingertipSourceV2C1::A;
+}
+
+inline void print_contact_telemetry_v2c1(
+    const char* prefix,
+    const touchplus::contact::ContactOutputV2C1& contact) {
+
+    std::cout
+        << std::fixed << std::setprecision(1)
+        << prefix
+        << " contact_state="
+        << touchplus::contact::contact_state_name_v2c1(contact.state)
+        << " contact_event="
+        << touchplus::contact::contact_event_name_v2c1(contact.event)
+        << " contact_reason=" << contact.reason
+        << " identity_id=" << contact.identity_id
+        << " fingertip_source="
+        << touchplus::contact::fingertip_source_name_v2c1(
+            contact.fingertip_source)
+        << " X=" << contact.x_mm
+        << " Y=" << contact.y_mm
+        << " H=" << contact.h_mm;
+    if (contact.delta_valid) {
+        std::cout
+            << " dH=" << contact.dh_mm
+            << " dXY=" << contact.dxy_mm;
+    } else {
+        std::cout << " dH=nan dXY=nan";
+    }
+    std::cout
+        << " candidate_count=" << contact.candidate_count
+        << " release_count=" << contact.release_count
+        << " DOWN_total=" << contact.down_total
+        << " UP_total=" << contact.up_total
+        << " OS_INJECTION=DISABLED\n";
+}
+
+inline void update_contact_v2c1(
+    RuntimeStateV10& hybrid,
+    touchplus::depth::tracking_runtime_detail::RuntimeState& modern) {
+
+    const auto& fusion = modern.tracker.last_fusion();
+    touchplus::contact::ContactInputV2C1 input;
+    input.identity_accepted = modern.enabled && fusion.publish &&
+        fusion.identity_id != 0 &&
+        touchplus::tracking::promotion_confidence_rank_v10c(
+            modern.tracker.identity_confidence()) > 0;
+    input.identity_current = modern_identity_current_v10c(modern);
+    input.identity_stale = modern_identity_stale_v10c(modern);
+    input.sample_valid = modern.result.fingertip_valid;
+    input.identity_id = fusion.identity_id;
+    input.fingertip_source = contact_source_v2c1(hybrid);
+    input.x_mm = modern.result.smoothed_tip.x_mm;
+    input.y_mm = modern.result.smoothed_tip.y_mm;
+    input.h_mm = modern.result.smoothed_tip.h_mm;
+
+    hybrid.contact = hybrid.contact_machine.update(input);
+    if (hybrid.contact.state_changed ||
+        hybrid.contact.event == touchplus::contact::ContactEventV2C1::TouchDown ||
+        hybrid.contact.event == touchplus::contact::ContactEventV2C1::TouchUp) {
+        print_contact_telemetry_v2c1("[CONTACT_TRANSITION]", hybrid.contact);
+    }
+}
+
 inline void overlay_refined_candidate(
     std::vector<std::uint8_t>& heatmap_bgra,
     const touchplus::tracking::DistalRefineResultV10& refined) {
@@ -455,6 +530,8 @@ inline void run_refiner(
 inline void maybe_report(RuntimeStateV10& hybrid) {
     ++hybrid.report_counter;
     if ((hybrid.report_counter % 30) != 0) return;
+
+    print_contact_telemetry_v2c1("[CONTACT] heartbeat |", hybrid.contact);
 
     if (hybrid.background_learning) {
         std::cout
@@ -607,6 +684,7 @@ inline void compute_depth_heatmap_hybrid_v10_wrapper(
     auto& hybrid = hybrid_refiner_runtime_detail_v10::state();
     hybrid_refiner_runtime_detail_v10::run_refiner(
         hybrid, modern, c, left, right, workspace, workspace.heatmap_bgra);
+    hybrid_refiner_runtime_detail_v10::update_contact_v2c1(hybrid, modern);
 }
 
 inline PointDepth point_depth_surface_runtime_hybrid_v10_wrapper(
