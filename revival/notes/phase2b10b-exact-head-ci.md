@@ -2,7 +2,7 @@
 
 Date: 2026-08-23
 
-Head:
+Head at this CI checkpoint:
 
 `80e8c64cda7560e62ec8e5ee254089330388f650`
 
@@ -28,4 +28,22 @@ The packaged tracker executable was verified to contain 2B.10B boundary strings:
 - `B_only`
 - `OS_INJECTION=DISABLED`
 
-No physical 2B.10B A/B verdict has been recorded yet.
+## Physical follow-up
+
+The physical 2B.10B A/B smoke was subsequently completed on the real Touch+ and is recorded in:
+
+`revival/notes/phase2b10b-shadow-stereo.md`
+
+Canonical physical summary:
+
+```text
+refiner accepts / attempts = 30 / 62
+shadow valid / attempted   = 28 / 30
+both A+B valid             = 26
+A_only                     = 1
+B_only                     = 2
+```
+
+Verdict: **PHYSICAL PASS / PROMISING** while keeping A authoritative and B shadow-only.
+
+This file remains a historical exact-head CI checkpoint; later documentation/governance commits may move the branch head without changing the tested runtime behavior.
