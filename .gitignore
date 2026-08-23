@@ -64,7 +64,7 @@ DerivedData
 *.pbxuser
 !default.pbxuser
 *.mode1v3
-!default.pbxuser
+!default.mode1v3
 *.mode2v3
 !default.mode2v3
 *.perspectivev3
@@ -81,7 +81,7 @@ DerivedData
 #
 # We recommend against adding the Pods directory to your .gitignore. However
 # you should judge for yourself, the pros and cons are mentioned at:
-# http://guides.cocoapods.org/using-the-pods-directory
+# http://guides.cocoapods.org/using/using-cocoapods.html#should-i-ignore-the-pods-directory-in-source-control
 #
 #Pods/
 
@@ -204,7 +204,7 @@ _ReSharper*/
 # JustCode is a .NET coding add-in
 .JustCode
 
-# TeamCity*
+# TeamCity is a build add-in
 _TeamCity*
 
 # DotCover is a Code Coverage Tool
@@ -224,7 +224,7 @@ AutoTest.Net/
 # Installshield output folder
 [Ee]xpress/
 
-# DocProject/buildhelp/
+# DocProject is a documentation generator add-in
 DocProject/buildhelp/
 DocProject/Help/*.HxT
 DocProject/Help/*.HxC
@@ -254,7 +254,7 @@ publish/
 # Uncomment if necessary however generally it will be regenerated when needed
 #!**/packages/repositories.config
 
-# Windows Azure Build Output folder
+# Windows Azure Build Output
 csx/
 *.build.csdef
 
