@@ -107,6 +107,73 @@ Completed successfully before commit:
 
 Exact-head GitHub Actions must be green after push before any physical 2B.10C evaluation is requested. CI success still does not constitute physical acceptance.
 
-## Later physical gate
+## Physical smoke — 2026-08-23
 
-The later physical review should inspect only frames labeled `WOULD_SELECT_B`. Any anatomically wrong finite candidate is a BLOCKER. A remains authoritative until a separate, explicitly approved promotion slice passes its physical boundary.
+A real-device counterfactual-gate smoke was reviewed over approximately 92 seconds with the Touch+ unit `0101007379`.
+
+The work area remained clear through background learning; `background=READY` was reached before the hand entered the work area. The run then exercised extended-index poses across left/right, vertical and diagonal orientations.
+
+Final observed telemetry was:
+
+```text
+refiner accepts / attempts = 107 / 162
+shadow valid / attempted   = 73 / 107
+both A+B valid             = 71
+A_only                     = 10
+B_only                     = 2
+
+gate evaluations           = 659
+KEEP_A                     = 644
+WOULD_SELECT_B             = 15
+```
+
+`WOULD_SELECT_B` therefore fired on about 2.3% of gate evaluations and only for `STRICT_EVIDENCE_GAIN`.
+
+Final observed reason counters included:
+
+```text
+IDENTITY_UNKNOWN              = 444
+IDENTITY_STALE                = 53
+REFINER_INWARD                = 31
+REFINER_REJECTED              = 44
+B_ONLY_INELIGIBLE             = 2
+A_INVALID                     = 19
+B_INVALID                     = 9
+EVIDENCE_NOT_STRICTLY_BETTER  = 44
+EXCESSIVE_2D_DELTA            = 1
+STRICT_EVIDENCE_GAIN          = 15
+```
+
+Representative accepted counterfactual selections included:
+
+```text
+coarse 543,249 -> refined 547,246
+shift = 5.0 px
+A = VALID / MEDIUM, support=3
+B = VALID / HIGH,   support=6
+B-A: dXYZ ~= 0.9 mm, dH ~= +0.3 mm
+=> WOULD_SELECT_B
+```
+
+and:
+
+```text
+coarse 299,270 -> refined 301,270
+shift = 2.0 px
+A = VALID / HIGH, support=6
+B = VALID / HIGH, support=7
+B-A: dXYZ ~= 1.3 mm, dH ~= +0.7 mm
+=> WOULD_SELECT_B
+```
+
+Visual review found the `WOULD_SELECT_B` occurrences on plausible distal index poses and did not observe an anatomically wrong finite counterfactual selection in this smoke. The gate also demonstrated the intended fail-closed behavior: `B_only` remained ineligible, one excessive 2D move was rejected, and stale/unknown identity dominated the `KEEP_A` population.
+
+**2B.10C verdict: PHYSICAL PASS for the counterfactual selector.**
+
+This is not a promotion of B. A remains authoritative and unchanged. Any later authoritative use of B requires a separate explicit promotion slice and a fresh physical gate. Personal video/frames are not committed.
+
+## Promotion boundary
+
+2B.10C has now passed its physical diagnostic boundary. The next architectural step, if pursued, should be a separate minimal promotion experiment rather than silently changing this PR's output ownership.
+
+A remains authoritative until such a follow-up slice is explicitly implemented and physically accepted.
