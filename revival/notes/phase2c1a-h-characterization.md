@@ -143,6 +143,51 @@ The implementation is diagnostic-only. The 6/4/8 mm thresholds, contact state
 machine, tracking and identity/fusion behavior, A/B selection, calibration,
 surface frame and OS output remain unchanged.
 
+## IPC isolation result and Phase 2C.1B metric diagnostic
+
+A follow-up bench monitor read both Phase 2B.9C named shared-memory maps directly while the live tracker was running. It established that the anatomical sidecar itself is healthy:
+
+- the C++ frame id advances normally;
+- the Python result frame follows at age 0–1 frame;
+- with no hand, results are correctly `UNAVAILABLE`;
+- with the index visible, the sidecar repeatedly emits `GUIDED` / `FULL_FRAME`, one candidate, `reason=0`;
+- no Python stderr/traceback was produced.
+
+A subsequent bench recording also showed the post-sidecar C++ anatomy path reaching `GUIDED_DISTAL/LOCKED/HIGH` and accepted fusion while the final metric fingertip remained invalid with stereo confidence low. Therefore the current blocker is downstream of anatomy/fusion, in the Touch+ stereo-to-metric publication stage, not in sidecar startup, IPC latency, or contact thresholds.
+
+Phase 2C.1B adds **diagnostic-only metric telemetry** inside `FingertipTrackerV9`. It does not alter any acceptance criterion. Every ~15 tracker frames, once the metric path is reached, it reports:
+
+```text
+[METRIC] frame=...
+fusion=PUBLISHED|NO
+target=x,y
+nearest_support_px=...
+nearest_disparity_px=...
+refined_candidates=...
+refined_consistent=...
+identity_confidence=...
+stereo_confidence=...
+reason=...
+OS_INJECTION=DISABLED
+```
+
+The explicit metric reasons are:
+
+- `NO_PHYSICAL_HAND_SUPPORT`
+- `FUSION_NOT_PUBLISHED`
+- `INVALID_TARGET_PIXEL`
+- `NO_NEAR_STEREO_SUPPORT`
+- `REFINED_SUPPORT_TOO_LOW`
+- `IDENTITY_STEREO_GATE`
+- `METRIC_JUMP_REJECTED`
+- `OK`
+
+`nearest_support_px` is the full-resolution distance between the fused fingertip target and the nearest accepted dense stereo support cell. `refined_candidates` is counted before the existing H-consistency filter and `refined_consistent` after it. No thresholds, matcher bounds, disparity search, stereo gate, smoothing, surface geometry, contact semantics, A/B selection, or OS output are changed.
+
+The bench launcher also now treats an empty sidecar stderr file safely instead of calling `.Trim()` on a null PowerShell value at shutdown. This is a launcher-only robustness fix and does not affect tracking.
+
+Physical acceptance remains pending. The immediate next bench goal is only to determine whether the dominant metric failure is `NO_NEAR_STEREO_SUPPORT` or `REFINED_SUPPORT_TOO_LOW` (or another explicit metric reason) before any algorithm or threshold change is considered.
+
 ## Safety boundary
 
 - PR #17 remains Draft;
