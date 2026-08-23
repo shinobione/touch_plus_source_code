@@ -3,6 +3,7 @@ param(
     [string]$Assets = ".\landmark-assets",
     [string]$Venv = ".\.touchplus-landmark-venv",
     [switch]$SkipSetup,
+    [switch]$EnableHybridPromotion,
     [switch]$SelfTestQuoting
 )
 
@@ -128,11 +129,17 @@ if ($sidecarProcess.HasExited) {
     throw "Anatomy sidecar failed to start."
 }
 
-Write-Host "[2B.9C] Starting Touch+ tracker. Close it with Q/ESC; sidecar will stop automatically." -ForegroundColor Green
+$promotionMode = if ($EnableHybridPromotion) { "ENABLED" } else { "DISABLED" }
+Write-Host "[2B.10D] Starting Touch+ tracker | hybrid promotion=$promotionMode. Close it with Q/ESC; sidecar will stop automatically." -ForegroundColor Green
 Write-Host "[2B.9C] Sidecar log: $stdout"
 
 try {
-    & $tracker
+    if ($EnableHybridPromotion) {
+        & $tracker --enable-hybrid-promotion
+    }
+    else {
+        & $tracker
+    }
     $trackerExit = $LASTEXITCODE
 }
 finally {

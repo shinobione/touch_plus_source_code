@@ -899,12 +899,15 @@ int run_self_test(const std::filesystem::path& calibration_path) {
 int wmain(int argc, wchar_t** argv) {
     bool legacy_init = false;
     bool self_test = false;
+    bool enable_hybrid_promotion = false;
     std::filesystem::path self_test_calibration;
 
     for (int i = 1; i < argc; ++i) {
         const std::wstring arg = argv[i];
         if (arg == L"--legacy-init") {
             legacy_init = true;
+        } else if (arg == L"--enable-hybrid-promotion") {
+            enable_hybrid_promotion = true;
         } else if (arg == L"--self-test") {
             self_test = true;
             if (i + 1 < argc) {
@@ -913,7 +916,16 @@ int wmain(int argc, wchar_t** argv) {
         }
     }
 
+    touchplus::depth::set_hybrid_promotion_enabled_v10d(
+        enable_hybrid_promotion);
+
     try {
+        std::cout
+            << "[HYBRID] promotion_mode="
+            << (touchplus::depth::hybrid_promotion_enabled_v10d()
+                    ? "ENABLED" : "DISABLED")
+            << " | opt_in_flag=--enable-hybrid-promotion"
+            << " | OS_INJECTION=DISABLED\n";
         if (self_test) {
             if (self_test_calibration.empty()) {
                 throw std::runtime_error("--self-test requires a calibration JSON path");
