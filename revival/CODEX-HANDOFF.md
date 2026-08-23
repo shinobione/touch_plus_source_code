@@ -49,8 +49,6 @@ Verdict: **PHYSICAL PASS / PROMISING**. A remains authoritative. B remains shado
 
 The next minimal slice is **Phase 2B.10C — counterfactual promotion gate**. It must not promote B into runtime output. It should only compute whether a frame would have selected B under a strict gate.
 
-2B.10C is now implemented on the active branch as a strictly diagnostic selector that reports only `KEEP_A` or `WOULD_SELECT_B` with explicit reason counters. B confidence and support may not regress, at least one must improve strictly, `B_only` is ineligible, 2D movement is bounded to 18 px, and coherent raw metric deltas are bounded to 18 mm in XYZ and 12 mm in H. A remains exclusively authoritative; physical evaluation is still pending.
-
 Before continuing, fetch the current PR #14 body and exact head SHA; do not rely on a head recorded in an old chat.
 
 ### Paused contact experiment
