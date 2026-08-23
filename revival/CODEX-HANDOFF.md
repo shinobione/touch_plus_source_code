@@ -1,155 +1,155 @@
 # TouchPlus Revival — Codex handoff
 
-This document is the short operational entry point for Codex. `revival/REVIVAL-ROADMAP.md` remains the canonical accepted-stack reference; the active PR + this handoff carry the current experimental slice.
+This is the short operational entry point for the current coding slice. `revival/REVIVAL-ROADMAP.md` remains the accepted-stack reference; the active PR + this handoff carry the experimental delta.
 
 ## Working model
 
-Use a split workflow:
-
-- **Codex = primary repo engineer**: code search, implementation, CMake/MSVC, tests, CI, branches/PRs, packaging and code review.
-- **Physical bench loop = hardware authority**: real Touch+ execution, visual/anatomical judgement, metric/contact smoke tests and final physical PASS/FAIL.
-
-Do not blur these roles. CI can prove software consistency; only the real device can close a hardware gate.
+- **Codex** handles focused repo implementation, CMake/MSVC, tests, CI and packaging.
+- **Physical bench loop** owns real Touch+ execution and PHYSICAL PASS/FAIL.
+- CI is never a substitute for a real-device gate.
 
 ## Canonical base
 
 Repository: `shinobione/touch_plus_source_code`
 
-Revival integration branch:
+Integration branch: `revival/main`
 
-`revival/main`
+Accepted merge containing 2B.10A/10B/10C:
 
-Read `AGENTS.md` before modifying anything.
+`74e28c329256185eee543ae9d8b865f7788f0b54`
 
-## Active/paused work
+Read `AGENTS.md` before changing code.
 
-### Active experiment
-
-PR #14
+## Active experiment
 
 Branch:
 
-`revival/hybrid-ractiv-refiner`
+`revival/phase2b10d-gated-promotion`
 
-2B.10A physically validated the Ractiv-inspired local full-resolution distal refiner when driven by accepted modern Revival fingertip identity.
+Phase:
 
-2B.10B then evaluated that refined pixel through the existing robust Touch+ stereo primitives in a **shadow A/B** path while keeping A authoritative.
+**2B.10D — gated authoritative promotion, explicit opt-in only**
 
-Physical 2B.10B result recorded on 2026-08-23:
+Design note:
 
-```text
-refiner accepts / attempts = 30 / 62
-shadow valid / attempted   = 28 / 30
-both A+B valid             = 26
-A_only                     = 1
-B_only                     = 2
-```
+`revival/notes/phase2b10d-gated-authoritative-promotion.md`
 
-Verdict: **PHYSICAL PASS / PROMISING**. A remains authoritative. B remains shadow-only.
+PR #14 is merged. Its physical results are accepted evidence:
 
-The next minimal slice is **Phase 2B.10C — counterfactual promotion gate**. It must not promote B into runtime output. It should only compute whether a frame would have selected B under a strict gate.
+- 2B.10A local distal refiner: PHYSICAL PASS;
+- 2B.10B shadow stereo A/B: PHYSICAL PASS / PROMISING;
+- 2B.10C counterfactual promotion gate: PHYSICAL PASS.
 
-Before continuing, fetch the current PR #14 body and exact head SHA; do not rely on a head recorded in an old chat.
-
-### Paused contact experiment
-
-PR #10
-
-Branch:
-
-`revival/phase2c-touch-contact`
-
-This work is intentionally paused while fingertip refinement is being evaluated. Do not resume or merge it implicitly as part of PR #14 work.
-
-### Historical recovery reference
-
-Ractiv Recovery work exists as a separate historical/experimental line. It demonstrated that parts of the July 2015 pipeline still run and that the local full-resolution refiner is useful when seeded with the correct finger identity. It did **not** establish Ractiv's own coarse index identity as reliable enough to replace Revival.
-
-## Protected accepted stack
-
-Treat these as frozen unless the task explicitly says otherwise:
-
-`Touch+ USB/Etron -> persistent stereo capture -> accepted local camera calibration -> rectification -> robust stereo/depth -> surface frame -> accepted modern fingertip identity`
-
-The following remain authoritative:
-
-- camera calibration matrices and Q;
-- metric depth from Touch+ stereo;
-- surface-frame coordinates and H;
-- modern fingertip identity/fusion safety;
-- fail-closed behavior on uncertain anatomy.
-
-## Hybrid refiner ownership rule
-
-The Ractiv-inspired refiner may only answer:
-
-> Given a fingertip identity already accepted by Revival, can a local full-resolution search move the candidate toward the true visible distal boundary without switching to another digit?
-
-It may **not** answer:
-
-> Which finger is the index?
-
-That identity remains the responsibility of the accepted modern pipeline.
-
-## 2B.10C counterfactual promotion gate
-
-2B.10C must remain diagnostic and output only a selection decision such as:
+2B.10C real-device gate summary:
 
 ```text
-KEEP_A
-WOULD_SELECT_B
+gate evaluations = 659
+KEEP_A           = 644
+WOULD_SELECT_B   = 15
 ```
 
-`WOULD_SELECT_B` may be emitted only when:
+No anatomically wrong finite `WOULD_SELECT_B` was observed in that smoke. `WOULD_SELECT_B` remained non-authoritative in 2B.10C.
 
-- A and B are both valid;
-- modern identity/fusion remains current and accepted;
-- B improves the confidence/support evidence strictly enough to justify evaluation;
-- refined 2D displacement remains within explicit bounded limits;
-- A/B metric delta is finite and within explicit coherence bounds.
+## 2B.10D objective
 
-Hard exclusions:
+Implement the first **authoritative** B selection, but only behind an explicit runtime opt-in.
 
-- `B_only` is never promotable in 2B.10C;
-- UNKNOWN/stale identity is never promotable;
-- non-finite or excessive metric deltas are never promotable;
-- a rejected/inward hybrid refinement is never promotable;
-- official runtime output, smoothing and XYZ/H remain A-only;
-- Phase 2C and OS injection remain untouched.
+Default launch must remain accepted-A behavior:
 
-The later physical gate should inspect only `WOULD_SELECT_B` frames. Any anatomically wrong finite candidate remains a BLOCKER.
+```text
+HYBRID_PROMOTION=DISABLED -> A authoritative only
+```
 
-## Promotion rule
+Experimental bench mode:
 
-Do not promote B into the authoritative path on CI evidence alone.
+```text
+HYBRID_PROMOTION=ENABLED
++ existing 2B.10C gate == WOULD_SELECT_B
+-> selected same-frame source = B
+else
+-> selected same-frame source = A
+```
 
-A real-device review remains binding. The core safety rule is:
+Reuse the existing `evaluate_promotion_gate_v10c(...)` rule. Do not loosen thresholds in this slice.
 
-**wrong finite/HIGH fingertip = BLOCKER; UNKNOWN is acceptable.**
+When B is selected, keep the source coherent for that frame:
 
-If B is useful only on a subset of poses, it may remain shadow diagnostic or be promoted only behind a strict confidence gate in a later slice.
+- selected pixel = B refined pixel;
+- selected raw `Xsurface / Ysurface / H` = B raw metric result;
+- modern identity id/confidence remains authoritative;
+- downstream smoothing may consume the selected metric sample only in explicit promotion-enabled mode.
 
-## Recommended Codex session start
+Do not mix A pixel with B XYZ/H or vice versa.
 
-At the beginning of a Codex session:
+## Hard exclusions
 
-1. inspect `git status` and current branch;
-2. read `AGENTS.md`;
-3. read `revival/REVIVAL-ROADMAP.md`;
-4. fetch/inspect the active PR and exact head;
-5. read the relevant `revival/notes/phase2b10*.md` files;
-6. inspect exact-head workflow results;
-7. summarize current authoritative path, shadow path, blocker and next smallest slice before editing.
+- `B_only` is never authoritative;
+- UNKNOWN/stale/non-current identity is never promotable;
+- rejected/inward refiner output is never promotable;
+- K/D/R/T/P/Q unchanged;
+- camera calibration unchanged;
+- accepted surface frame unchanged;
+- Phase 2C remains paused and untouched;
+- PointerMapper / UDP / mouse / touch / OS injection remain disabled;
+- do not let B create/reacquire finger identity.
 
-## Recommended end-of-slice handoff
+## Required telemetry
 
-Before returning work to the physical bench:
+Expose clearly:
 
-- commit the smallest coherent change;
-- report exact branch + head SHA;
-- report exact tests/builds run and their result;
-- report exact-head CI state;
-- state whether the build is diagnostic or authoritative;
-- provide one compact physical smoke protocol;
-- state the exact PASS criterion and blocker;
-- never claim the physical result in advance.
+```text
+promotion_mode=DISABLED|ENABLED
+promotion_gate=KEEP_A|WOULD_SELECT_B
+selected_source=A|B
+selected_reason=...
+A confidence/support
+B confidence/support
+shift_px
+dXYZ
+dH
+selected_A cumulative
+selected_B cumulative
+source_switches cumulative
+```
+
+## Required synthetic coverage
+
+At minimum:
+
+1. promotion disabled + WOULD_SELECT_B -> A;
+2. promotion enabled + WOULD_SELECT_B -> B;
+3. promotion enabled + KEEP_A -> A;
+4. B_only -> A;
+5. UNKNOWN/stale/non-current -> A;
+6. non-finite/excessive A/B delta -> A;
+7. inward/rejected refiner -> A;
+8. selected pixel and selected metric source always match;
+9. existing V8/V9/2B.10A/2B.10C tests remain green x64 + Win32;
+10. Phase 2A and Phase 1C/Q regressions remain green;
+11. OS injection remains disabled.
+
+## Scope discipline
+
+Do not re-audit the entire repository unless a contradiction appears.
+
+Primary working set should be limited to the existing 2B.10C gate, its runtime integration, focused tests, CMake/workflow packaging and this slice's documentation.
+
+Do not modify unrelated accepted layers.
+
+## End-of-slice contract
+
+Before handing back to the bench:
+
+- commit + push to `revival/phase2b10d-gated-promotion`;
+- report exact SHA;
+- report files changed;
+- report local tests/builds;
+- verify exact-head GitHub CI;
+- package a Win32 artifact with promotion disabled by default;
+- document the exact opt-in launch command for the promotion-enabled physical smoke;
+- do not merge;
+- do not claim physical acceptance.
+
+Physical blocker remains:
+
+**any anatomically wrong finite promoted B fingertip = BLOCKER.**
