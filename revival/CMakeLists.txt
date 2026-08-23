@@ -138,6 +138,10 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         src/surface_frame_math.h
         src/depth_surface_frame.h
         src/depth_surface_frame_runtime.h
+        src/depth_surface_frame_runtime_v10.h
+        src/fingertip_promotion_gate_v10c.h
+        src/fingertip_refiner_v10.h
+        src/fingertip_stereo_shadow_v10b.h
     )
     list(APPEND REVIVAL_TARGETS touchplus_depth_viewer)
     target_compile_features(touchplus_depth_viewer PRIVATE cxx_std_20)
@@ -148,13 +152,12 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${ETRON_DIR}"
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
-    # One composite forced header preserves the hardened NCC/LR/consensus/
-    # temporal matcher and P-key diagnostics, then layers Phase 2A surface
-    # C/F/R/H controls above them. The underlying depth_viewer.cpp stays on the
-    # proven persistent capture/render path.
+    # Preserve the accepted Phase 1C/2A/2B composite runtime, then layer the
+    # Phase 2B.10C counterfactual promotion gate in diagnostic-only mode. The
+    # layer may report WOULD_SELECT_B but never replaces A or mutates output.
     if(MSVC)
         target_compile_options(touchplus_depth_viewer PRIVATE
-            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_surface_frame_runtime.h"
+            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_surface_frame_runtime_v10.h"
         )
     endif()
     target_link_libraries(touchplus_depth_viewer PRIVATE
