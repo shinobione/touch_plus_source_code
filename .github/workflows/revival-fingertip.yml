@@ -62,6 +62,12 @@ jobs:
           & "build/fingertip-x64/Release/touchplus_contact_semantics_selftest.exe"
           if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1 contact semantics x64 self-test failed: $LASTEXITCODE" }
 
+      - name: Run Phase 2C.1A diagnostic CSV self-test x64
+        shell: pwsh
+        run: |
+          & "build/fingertip-x64/Release/touchplus_phase2c1a_diagnostic_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1A diagnostic CSV x64 self-test failed: $LASTEXITCODE" }
+
   landmark-live-sidecar-probe:
     runs-on: windows-latest
     steps:
@@ -175,6 +181,12 @@ jobs:
           & "build/fingertip-x86/Release/touchplus_contact_semantics_selftest.exe"
           if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1 contact semantics Win32 self-test failed: $LASTEXITCODE" }
 
+      - name: Run Phase 2C.1A diagnostic CSV self-test Win32
+        shell: pwsh
+        run: |
+          & "build/fingertip-x86/Release/touchplus_phase2c1a_diagnostic_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1A diagnostic CSV Win32 self-test failed: $LASTEXITCODE" }
+
       - name: Configure Revival Win32
         run: cmake -S revival -B build/revival-x86 -A Win32
 
@@ -196,11 +208,11 @@ jobs:
           & $exe --self-test $cal
           if ($LASTEXITCODE -ne 0) { throw "Phase 1C depth self-test regressed: $LASTEXITCODE" }
 
-      - name: Prepare Phase 2C.1 contact semantics physical-smoke kit
+      - name: Prepare Phase 2C.1A H-characterization physical-smoke kit
         shell: pwsh
         run: |
           $src = "build/revival-x86/Release"
-          $kit = "build/touchplus-phase2c1-contact-semantics"
+          $kit = "build/touchplus-phase2c1a-h-characterization"
           New-Item -ItemType Directory -Force -Path $kit | Out-Null
           New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
 
@@ -225,12 +237,23 @@ jobs:
           Copy-Item "revival/notes/phase2b10c-counterfactual-promotion-gate.md" "$kit/README-2B10C-counterfactual-gate.md"
           Copy-Item "revival/notes/phase2b10d-gated-authoritative-promotion.md" "$kit/README-2B10D-gated-promotion.md"
           Copy-Item "revival/notes/phase2c1-contact-semantics.md" "$kit/README-2C1-contact-semantics.md"
+          Copy-Item "revival/notes/phase2c1a-h-characterization.md" "$kit/README-2C1A-h-characterization.md"
 
           @'
-          TouchPlus Revival Phase 2C.1 - semantic contact physical smoke
+          TouchPlus Revival Phase 2C.1A - labelled H diagnostic smoke
 
-          Phase 2C.1 first smoke (accepted default A, sidecar enabled):
+          Accepted default A, sidecar enabled:
             powershell.exe -ExecutionPolicy Bypass -File .\start-touchplus-phase2b9c.ps1
+
+          Runtime labels:
+            H = HIGH
+            N = NEAR
+            C = CONTACT
+            0 = NONE
+
+          A timestamped touchplus-phase2c1a-*.csv is written beside the runtime.
+          Invalid, UNKNOWN and stale frames are included. Close with Q/ESC so
+          the CSV is flushed and closed cleanly.
 
           Optional already-accepted 2B.10D B-promotion mode:
             powershell.exe -ExecutionPolicy Bypass -File .\start-touchplus-phase2b9c.ps1 -EnableHybridPromotion
@@ -242,10 +265,10 @@ jobs:
 
           Get-ChildItem -Recurse $kit | Select-Object FullName,Length | Format-Table -AutoSize
 
-      - name: Upload Phase 2C.1 contact semantics physical-smoke kit
+      - name: Upload Phase 2C.1A H-characterization physical-smoke kit
         uses: actions/upload-artifact@v4
         with:
-          name: touchplus-phase2c1-contact-semantics-windows
-          path: build/touchplus-phase2c1-contact-semantics/**
+          name: touchplus-phase2c1a-h-characterization-windows
+          path: build/touchplus-phase2c1a-h-characterization/**
           if-no-files-found: error
           retention-days: 30

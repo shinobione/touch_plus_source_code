@@ -19,6 +19,9 @@ add_executable(touchplus_fingertip_authoritative_selection_selftest
 add_executable(touchplus_contact_semantics_selftest
     ../src/contact_state_machine_v2c1_selftest.cpp
 )
+add_executable(touchplus_phase2c1a_diagnostic_selftest
+    ../src/phase2c1a_diagnostic_selftest.cpp
+)
 
 foreach(target
         touchplus_fingertip_tracker_selftest
@@ -26,7 +29,8 @@ foreach(target
         touchplus_fingertip_refiner_selftest
         touchplus_fingertip_promotion_gate_selftest
         touchplus_fingertip_authoritative_selection_selftest
-        touchplus_contact_semantics_selftest)
+        touchplus_contact_semantics_selftest
+        touchplus_phase2c1a_diagnostic_selftest)
     target_compile_features(${target} PRIVATE cxx_std_20)
     target_compile_definitions(${target} PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX

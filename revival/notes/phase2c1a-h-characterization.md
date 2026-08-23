@@ -106,6 +106,43 @@ The next physical run should be self-labelling and machine-readable rather than 
 
 This instrumentation must not alter accepted tracking/contact behavior, thresholds, calibration, surface geometry or OS output.
 
+## Diagnostic implementation
+
+The Phase 2C.1A runtime diagnostic is self-labelled and machine-readable:
+
+- `H` selects `HIGH`;
+- `N` selects `NEAR`;
+- `C` selects `CONTACT`;
+- `0` selects `NONE` for gaps and unlabelled frames.
+
+The current label is printed when it changes. A timestamped
+`touchplus-phase2c1a-YYYYMMDD-HHMMSS.csv` is created beside the runtime
+executable. It contains one row per processed frame, including invalid,
+UNKNOWN, stale and non-current observations, with this schema:
+
+```text
+timestamp_utc,frame,physical_label,identity_id,identity_accepted,identity_current,identity_stale,fingertip_valid,fingertip_source,raw_h_mm,smoothed_h_mm,contact_state,contact_event,rejection_reason
+```
+
+Invalid H values are emitted as `nan`. The file header is flushed immediately,
+rows are flushed every 30 frames and on label changes, and the stream is flushed
+and closed during normal runtime shutdown.
+
+The physical smoke must use accepted default A mode:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\start-touchplus-phase2b9c.ps1
+```
+
+Press `B` once on a clear scene and wait for `background=READY`, then record
+stable `HIGH`, `NONE`, `NEAR`, `NONE`, `CONTACT`, `NONE` intervals. Close with
+`Q` or `ESC` so the CSV is closed cleanly. Do not enable hybrid promotion for
+this characterization.
+
+The implementation is diagnostic-only. The 6/4/8 mm thresholds, contact state
+machine, tracking and identity/fusion behavior, A/B selection, calibration,
+surface frame and OS output remain unchanged.
+
 ## Safety boundary
 
 - PR #17 remains Draft;

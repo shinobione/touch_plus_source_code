@@ -140,6 +140,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         src/depth_surface_frame_runtime.h
         src/depth_surface_frame_runtime_v10.h
         src/contact_state_machine_v2c1.h
+        src/phase2c1a_diagnostic.h
         src/fingertip_authoritative_selection_v10d.h
         src/fingertip_promotion_gate_v10c.h
         src/fingertip_refiner_v10.h
