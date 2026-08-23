@@ -1,6 +1,6 @@
 # TouchPlus Revival — Codex handoff
 
-This document is the short operational entry point for Codex. `revival/REVIVAL-ROADMAP.md` remains the canonical long-form project state.
+This document is the short operational entry point for Codex. `revival/REVIVAL-ROADMAP.md` remains the canonical accepted-stack reference; the active PR + this handoff carry the current experimental slice.
 
 ## Working model
 
