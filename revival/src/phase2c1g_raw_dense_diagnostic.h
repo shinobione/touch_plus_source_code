@@ -1,21 +1,23 @@
 #pragma once
 
-// Phase 2C.1G diagnostic-only wrapper.
+// Phase 2C.1G / 2C.1G.1 diagnostic-only wrapper.
 //
-// Phase 2C.1F closed the simple low-texture-threshold path: authoritative
-// TextureLow probes did not survive a complete shadow forward/reverse/LR check
-// during real physical contact. 2C.1G therefore leaves the full-resolution
-// matcher untouched and inspects a different signal already present in the
-// accepted stack: half-resolution dense stereo BEFORE the V6 support H floor
-// (kV6MinSupportHmm = 8 mm) is applied.
+// 2C.1G inspects half-resolution dense stereo BEFORE the V6 support H floor
+// (kV6MinSupportHmm = 8 mm) is applied. The first physical 2C.1G smoke exposed
+// an instrumentation blind spot: HIGH/NEAR/CONTACT were exercised, but the
+// conservative fusion gate did not publish on that sequence, so no RAW_DENSE
+// line was emitted even though provisional 2D fingertip candidates existed.
 //
-// This wrapper always runs the exact accepted 2B.10D/2C runtime first, then
-// observes dense cells around the already-published fused fingertip. It reuses
-// the same dense cost/uniqueness validity rule as FingertipTrackerV9, applies Q
-// and the accepted surface transform, keeps the accepted surface ROI, but does
-// NOT apply the V6 H>=8 mm support floor. It is telemetry-only and cannot feed
-// identity, stereo refinement, smoothing, contact semantics, promotion or OS
-// output.
+// 2C.1G.1 therefore chooses a telemetry target in this strict order:
+//   1) published fused fingertip;
+//   2) non-stale/non-rejected anatomy candidate already computed by V9;
+//   3) geometry candidate already computed by V8.
+// The target source is printed explicitly. Provisional targets are diagnostic
+// only: they cannot feed identity, stereo refinement, smoothing, contact,
+// promotion, calibration/surface state or OS output.
+//
+// Dense validity, Q projection and surface ROI are unchanged from 2C.1G. The
+// only intentionally bypassed rule remains the V6 H>=8 mm support floor.
 
 #include "depth_surface_frame_runtime_v10.h"
 
@@ -43,6 +45,7 @@ struct RawDenseDiagnosticV2C1G {
     std::uint32_t frame = 0;
     int target_x = -1;
     int target_y = -1;
+    const char* target_source = "NONE";
     int raw_dense_count = 0;
     double nearest_raw_dense_px = std::numeric_limits<double>::quiet_NaN();
     double nearest_raw_dense_h_mm = std::numeric_limits<double>::quiet_NaN();
@@ -51,6 +54,41 @@ struct RawDenseDiagnosticV2C1G {
     double local_h_p25_mm = std::numeric_limits<double>::quiet_NaN();
     double local_h_median_mm = std::numeric_limits<double>::quiet_NaN();
 };
+
+inline bool choose_target_v2c1g1(
+    touchplus::depth::tracking_runtime_detail::RuntimeState& modern,
+    int& x,
+    int& y,
+    const char*& source) {
+
+    const auto& fusion = modern.tracker.last_fusion();
+    if (fusion.publish && fusion.pixel_x >= 0 && fusion.pixel_y >= 0) {
+        x = fusion.pixel_x;
+        y = fusion.pixel_y;
+        source = "FUSED";
+        return true;
+    }
+
+    const auto& anatomy = modern.tracker.last_anatomy_decision();
+    if (anatomy.has_candidate && !anatomy.stale &&
+        !anatomy.explicit_reject && !anatomy.jump_rejected &&
+        anatomy.tip_x >= 0 && anatomy.tip_y >= 0) {
+        x = anatomy.tip_x;
+        y = anatomy.tip_y;
+        source = "ANATOMY";
+        return true;
+    }
+
+    const auto& geometry = modern.tracker.last_decision();
+    if (geometry.has_candidate && geometry.tip_gx >= 0 && geometry.tip_gy >= 0) {
+        x = geometry.tip_gx * kDepthScale + 1;
+        y = geometry.tip_gy * kDepthScale + 1;
+        source = "GEOMETRY";
+        return true;
+    }
+
+    return false;
+}
 
 inline RawDenseDiagnosticV2C1G evaluate_raw_dense_v2c1g(
     const Calibration& calibration,
@@ -62,18 +100,19 @@ inline RawDenseDiagnosticV2C1G evaluate_raw_dense_v2c1g(
 
     if (!modern.enabled || !modern.tracker.background_ready()) return out;
 
-    const auto& fusion = modern.tracker.last_fusion();
     const auto& mask = modern.tracker.selected_mask();
     const auto& surface = touchplus::surface::live_surface_model();
-    if (!fusion.publish || fusion.pixel_x < 0 || fusion.pixel_y < 0 ||
-        mask.size() != static_cast<std::size_t>(kDepthWidth) * kDepthHeight ||
+    if (mask.size() != static_cast<std::size_t>(kDepthWidth) * kDepthHeight ||
         !surface.valid) {
         return out;
     }
 
+    if (!choose_target_v2c1g1(
+            modern, out.target_x, out.target_y, out.target_source)) {
+        return out;
+    }
+
     out.attempted = true;
-    out.target_x = fusion.pixel_x;
-    out.target_y = fusion.pixel_y;
 
     // Match FingertipTrackerV9's accepted half-resolution dense validity rule.
     constexpr int patch_radius = 2;
@@ -81,11 +120,10 @@ inline RawDenseDiagnosticV2C1G evaluate_raw_dense_v2c1g(
     constexpr int max_average_cost = 44;
     constexpr double uniqueness = 1.08;
     constexpr int inf = std::numeric_limits<int>::max() / 4;
-
     constexpr int local_radius2 = kLocalRadiusCellsV2C1G * kLocalRadiusCellsV2C1G;
 
-    const int target_gx = fusion.pixel_x / kDepthScale;
-    const int target_gy = fusion.pixel_y / kDepthScale;
+    const int target_gx = out.target_x / kDepthScale;
+    const int target_gy = out.target_y / kDepthScale;
     const int min_gx = std::max(0, target_gx - kLocalRadiusCellsV2C1G);
     const int max_gx = std::min(kDepthWidth - 1, target_gx + kLocalRadiusCellsV2C1G);
     const int min_gy = std::max(0, target_gy - kLocalRadiusCellsV2C1G);
@@ -178,6 +216,7 @@ inline void report_raw_dense_v2c1g(const RawDenseDiagnosticV2C1G& d) {
 
     std::cout << std::fixed << std::setprecision(1)
               << "[RAW_DENSE] frame=" << d.frame
+              << " target_source=" << d.target_source
               << " target=" << d.target_x << ',' << d.target_y
               << " count=" << d.raw_dense_count
               << " nearest_px=";
@@ -194,6 +233,7 @@ inline void report_raw_dense_v2c1g(const RawDenseDiagnosticV2C1G& d) {
     print_value(d.local_h_median_mm);
     std::cout << " radius_px=" << kLocalRadiusPxV2C1G
               << " pre_support_H_floor=BYPASSED"
+              << " provisional_target=TELEMETRY_ONLY"
               << " authoritative=UNCHANGED"
               << " OS_INJECTION=DISABLED\n";
 }
