@@ -1,12 +1,15 @@
 #pragma once
 
 // Phase 2C.1D diagnostic-only replay for the existing LEFT->RIGHT matcher.
+// Phase 2C.1E extends that replay counterfactually for authoritative
+// TextureLow rejects: it keeps the authoritative rejection reason unchanged,
+// but continues the shadow NCC/uniqueness calculation so telemetry can show
+// whether a lower texture floor would even have a plausible forward match.
 //
 // This file does NOT alter search_left_to_right(), mutually_consistent_match(),
-// disparity limits, patch size, NCC thresholds, calibration, Q, surface frame,
-// identity/fusion, smoothing or contact semantics. It only replays the exact
-// forward-stage decision path after an authoritative forward failure so the
-// runtime can classify why that probe died.
+// disparity limits, patch size, authoritative NCC thresholds, calibration, Q,
+// surface frame, identity/fusion, smoothing or contact semantics. Everything in
+// this file is diagnostic-only and cannot publish an authoritative match.
 
 #include "depth_point_robust.h"
 
@@ -36,6 +39,13 @@ struct ForwardMatchDiagnosticV2C1D {
     double winning_disparity = std::numeric_limits<double>::quiet_NaN();
     int min_disparity = 0;
     int max_disparity = -1;
+
+    // Phase 2C.1E shadow-only metadata. Existing 2C.1D counters still classify
+    // this probe as TextureLow exactly as the authoritative matcher did.
+    bool authoritative_texture_reject = false;
+    bool shadow_search_reached_candidate = false;
+    bool shadow_passes_correlation = false;
+    bool shadow_passes_uniqueness = false;
 };
 
 inline ForwardMatchDiagnosticV2C1D diagnose_left_to_right_v2c1d(
@@ -56,9 +66,14 @@ inline ForwardMatchDiagnosticV2C1D diagnose_left_to_right_v2c1d(
         return out;
     }
     out.reference_variance = variance;
-    if (variance < kMinTextureVariance) {
+
+    // Preserve the exact authoritative classification, but do not return early
+    // for TextureLow. The remaining computation is counterfactual/shadow-only.
+    // It cannot feed the authoritative matcher or fingertip result.
+    const bool texture_rejected = variance < kMinTextureVariance;
+    if (texture_rejected) {
         out.reason = ForwardFailureReasonV2C1D::TextureLow;
-        return out;
+        out.authoritative_texture_reject = true;
     }
 
     min_disp = std::max(kMinDisparity, min_disp);
@@ -66,7 +81,7 @@ inline ForwardMatchDiagnosticV2C1D diagnose_left_to_right_v2c1d(
     out.min_disparity = min_disp;
     out.max_disparity = max_disp;
     if (max_disp < min_disp) {
-        out.reason = ForwardFailureReasonV2C1D::WindowEmpty;
+        if (!texture_rejected) out.reason = ForwardFailureReasonV2C1D::WindowEmpty;
         return out;
     }
 
@@ -85,16 +100,18 @@ inline ForwardMatchDiagnosticV2C1D diagnose_left_to_right_v2c1d(
     }
 
     if (best_d < 0) {
-        out.reason = ForwardFailureReasonV2C1D::NoValidCandidate;
+        if (!texture_rejected) out.reason = ForwardFailureReasonV2C1D::NoValidCandidate;
         return out;
     }
 
+    out.shadow_search_reached_candidate = texture_rejected;
     out.best_ncc = best;
     out.winning_disparity = static_cast<double>(best_d);
     if (best < kMinCorrelation) {
-        out.reason = ForwardFailureReasonV2C1D::CorrelationLow;
+        if (!texture_rejected) out.reason = ForwardFailureReasonV2C1D::CorrelationLow;
         return out;
     }
+    if (texture_rejected) out.shadow_passes_correlation = true;
 
     double second = -1.0;
     for (int d = min_disp; d <= max_disp; ++d) {
@@ -105,9 +122,10 @@ inline ForwardMatchDiagnosticV2C1D diagnose_left_to_right_v2c1d(
     if (second > -0.5) out.best_minus_second = best - second;
 
     if (second > -0.5 && best - second < kMinCorrelationGap) {
-        out.reason = ForwardFailureReasonV2C1D::UniquenessFail;
+        if (!texture_rejected) out.reason = ForwardFailureReasonV2C1D::UniquenessFail;
         return out;
     }
+    if (texture_rejected) out.shadow_passes_uniqueness = true;
 
     double disparity = static_cast<double>(best_d);
     if (best_d > min_disp && best_d < max_disp) {
@@ -123,7 +141,7 @@ inline ForwardMatchDiagnosticV2C1D diagnose_left_to_right_v2c1d(
     }
 
     out.winning_disparity = disparity;
-    out.reason = ForwardFailureReasonV2C1D::Accepted;
+    if (!texture_rejected) out.reason = ForwardFailureReasonV2C1D::Accepted;
     return out;
 }
 
