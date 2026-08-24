@@ -76,9 +76,6 @@ struct ShadowContactOutputV2C1H {
     const char* reason = "NO_SAMPLE";
 };
 
-// Shadow-only first-smoke constants. These are deliberately not contact facts
-// and must not be copied into the authoritative contact state machine without a
-// separate physical acceptance gate.
 constexpr int kMinDenseCountV2C1H = 8;
 constexpr int kHoldMinDenseCountV2C1H = 6;
 constexpr double kCandidateMedianMinHmmV2C1H = 8.0;
@@ -150,9 +147,7 @@ public:
             }
             ++release_count_;
             if (release_count_ >= kReleaseFramesV2C1H) {
-                latched_ = false;
-                candidate_count_ = 0;
-                release_count_ = 0;
+                reset_after_release();
                 out.would_contact = false;
                 out.event = ShadowContactEventV2C1H::WouldUp;
                 out.candidate_count = 0;
@@ -215,6 +210,13 @@ private:
         double h_median_mm = 0.0;
     };
 
+    void reset_after_release() {
+        history_.clear();
+        latched_ = false;
+        candidate_count_ = 0;
+        release_count_ = 0;
+    }
+
     ShadowContactOutputV2C1H handle_unusable(
         ShadowContactOutputV2C1H out,
         const char* reason,
@@ -228,8 +230,7 @@ private:
         }
 
         if (hard_identity_loss) {
-            latched_ = false;
-            release_count_ = 0;
+            reset_after_release();
             out.would_contact = false;
             out.event = ShadowContactEventV2C1H::WouldUp;
             out.candidate_count = 0;
@@ -240,8 +241,7 @@ private:
 
         ++release_count_;
         if (release_count_ >= kReleaseFramesV2C1H) {
-            latched_ = false;
-            release_count_ = 0;
+            reset_after_release();
             out.would_contact = false;
             out.event = ShadowContactEventV2C1H::WouldUp;
             out.candidate_count = 0;
