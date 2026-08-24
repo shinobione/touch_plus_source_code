@@ -5,6 +5,9 @@
 // TextureLow rejects: it keeps the authoritative rejection reason unchanged,
 // but continues the shadow NCC/uniqueness calculation so telemetry can show
 // whether a lower texture floor would even have a plausible forward match.
+// Phase 2C.1E.1 makes the exported NCC/gap/disparity fields texture-shadow-only
+// so the existing [FWD] aggregate cannot be contaminated by unrelated
+// CorrelationLow/UniquenessFail probes from the same frame.
 //
 // This file does NOT alter search_left_to_right(), mutually_consistent_match(),
 // disparity limits, patch size, authoritative NCC thresholds, calibration, Q,
@@ -33,6 +36,10 @@ enum class ForwardFailureReasonV2C1D {
 struct ForwardMatchDiagnosticV2C1D {
     ForwardFailureReasonV2C1D reason = ForwardFailureReasonV2C1D::NoValidCandidate;
     double reference_variance = std::numeric_limits<double>::quiet_NaN();
+
+    // 2C.1E.1: exported match-quality values are populated only for
+    // authoritative TextureLow rejects. The tracker already aggregates these
+    // fields, so [FWD] now reports the best low-texture counterfactual only.
     double best_ncc = std::numeric_limits<double>::quiet_NaN();
     double second_ncc = std::numeric_limits<double>::quiet_NaN();
     double best_minus_second = std::numeric_limits<double>::quiet_NaN();
@@ -104,9 +111,12 @@ inline ForwardMatchDiagnosticV2C1D diagnose_left_to_right_v2c1d(
         return out;
     }
 
-    out.shadow_search_reached_candidate = texture_rejected;
-    out.best_ncc = best;
-    out.winning_disparity = static_cast<double>(best_d);
+    if (texture_rejected) {
+        out.shadow_search_reached_candidate = true;
+        out.best_ncc = best;
+        out.winning_disparity = static_cast<double>(best_d);
+    }
+
     if (best < kMinCorrelation) {
         if (!texture_rejected) out.reason = ForwardFailureReasonV2C1D::CorrelationLow;
         return out;
@@ -118,8 +128,11 @@ inline ForwardMatchDiagnosticV2C1D diagnose_left_to_right_v2c1d(
         if (std::abs(d - best_d) <= 2) continue;
         second = std::max(second, scores[static_cast<std::size_t>(d)]);
     }
-    out.second_ncc = second;
-    if (second > -0.5) out.best_minus_second = best - second;
+
+    if (texture_rejected) {
+        out.second_ncc = second;
+        if (second > -0.5) out.best_minus_second = best - second;
+    }
 
     if (second > -0.5 && best - second < kMinCorrelationGap) {
         if (!texture_rejected) out.reason = ForwardFailureReasonV2C1D::UniquenessFail;
@@ -140,7 +153,7 @@ inline ForwardMatchDiagnosticV2C1D diagnose_left_to_right_v2c1d(
         }
     }
 
-    out.winning_disparity = disparity;
+    if (texture_rejected) out.winning_disparity = disparity;
     if (!texture_rejected) out.reason = ForwardFailureReasonV2C1D::Accepted;
     return out;
 }
