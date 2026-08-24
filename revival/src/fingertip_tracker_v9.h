@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fingertip_anatomy_ipc_v9.h"
+#include "forward_match_diagnostic_v2c1d.h"
 
 #include <algorithm>
 #include <array>
@@ -48,6 +49,22 @@ struct MetricDiagnosticsV9 {
     int probe_surface_h_reject = 0;
     int probe_surface_roi_reject = 0;
     int probe_accepted = 0;
+
+    // Phase 2C.1D diagnostic-only split of forward_match_fail. The helper
+    // replays the exact current forward-stage decisions only after the
+    // authoritative forward matcher has already rejected the probe.
+    int probe_forward_patch_oob = 0;
+    int probe_forward_texture_low = 0;
+    int probe_forward_window_empty = 0;
+    int probe_forward_no_candidate = 0;
+    int probe_forward_correlation_low = 0;
+    int probe_forward_uniqueness_fail = 0;
+    int probe_forward_diag_accepted = 0;
+    double forward_reference_variance_max = std::numeric_limits<double>::quiet_NaN();
+    double forward_best_ncc_max = std::numeric_limits<double>::quiet_NaN();
+    double forward_second_ncc_at_best = std::numeric_limits<double>::quiet_NaN();
+    double forward_best_minus_second_at_best = std::numeric_limits<double>::quiet_NaN();
+    double forward_winning_disparity_at_best = std::numeric_limits<double>::quiet_NaN();
 
     std::string reject_reason = "NOT_RUN";
 };
@@ -251,6 +268,46 @@ public:
                         left_gray, right_gray, sx, sy, min_d, max_d);
                     if (!forward.valid) {
                         ++metric_diagnostics_.probe_forward_match_fail;
+
+                        const auto forward_diag = diagnose_left_to_right_v2c1d(
+                            left_gray, right_gray, sx, sy, min_d, max_d);
+                        if (std::isfinite(forward_diag.reference_variance) &&
+                            (!std::isfinite(metric_diagnostics_.forward_reference_variance_max) ||
+                             forward_diag.reference_variance > metric_diagnostics_.forward_reference_variance_max)) {
+                            metric_diagnostics_.forward_reference_variance_max = forward_diag.reference_variance;
+                        }
+                        if (std::isfinite(forward_diag.best_ncc) &&
+                            (!std::isfinite(metric_diagnostics_.forward_best_ncc_max) ||
+                             forward_diag.best_ncc > metric_diagnostics_.forward_best_ncc_max)) {
+                            metric_diagnostics_.forward_best_ncc_max = forward_diag.best_ncc;
+                            metric_diagnostics_.forward_second_ncc_at_best = forward_diag.second_ncc;
+                            metric_diagnostics_.forward_best_minus_second_at_best = forward_diag.best_minus_second;
+                            metric_diagnostics_.forward_winning_disparity_at_best = forward_diag.winning_disparity;
+                        }
+
+                        switch (forward_diag.reason) {
+                        case ForwardFailureReasonV2C1D::Accepted:
+                            ++metric_diagnostics_.probe_forward_diag_accepted;
+                            break;
+                        case ForwardFailureReasonV2C1D::PatchOutOfBounds:
+                            ++metric_diagnostics_.probe_forward_patch_oob;
+                            break;
+                        case ForwardFailureReasonV2C1D::TextureLow:
+                            ++metric_diagnostics_.probe_forward_texture_low;
+                            break;
+                        case ForwardFailureReasonV2C1D::WindowEmpty:
+                            ++metric_diagnostics_.probe_forward_window_empty;
+                            break;
+                        case ForwardFailureReasonV2C1D::NoValidCandidate:
+                            ++metric_diagnostics_.probe_forward_no_candidate;
+                            break;
+                        case ForwardFailureReasonV2C1D::CorrelationLow:
+                            ++metric_diagnostics_.probe_forward_correlation_low;
+                            break;
+                        case ForwardFailureReasonV2C1D::UniquenessFail:
+                            ++metric_diagnostics_.probe_forward_uniqueness_fail;
+                            break;
+                        }
                     } else {
                         const int right_x = static_cast<int>(std::lround(sx - forward.disparity));
                         const int narrow_min = std::max(
@@ -389,6 +446,47 @@ private:
                   << " stereo_confidence=" << stereo_confidence_
                   << " reason=" << metric_diagnostics_.reject_reason
                   << " OS_INJECTION=DISABLED\n";
+
+        if (metric_diagnostics_.probe_forward_match_fail > 0) {
+            std::cout << "[FWD] frame=" << frame_id_
+                      << " patch_oob=" << metric_diagnostics_.probe_forward_patch_oob
+                      << " texture_low=" << metric_diagnostics_.probe_forward_texture_low
+                      << " window_empty=" << metric_diagnostics_.probe_forward_window_empty
+                      << " no_candidate=" << metric_diagnostics_.probe_forward_no_candidate
+                      << " corr_low=" << metric_diagnostics_.probe_forward_correlation_low
+                      << " uniqueness_fail=" << metric_diagnostics_.probe_forward_uniqueness_fail
+                      << " diag_accepted=" << metric_diagnostics_.probe_forward_diag_accepted
+                      << " reference_variance_max=";
+            if (std::isfinite(metric_diagnostics_.forward_reference_variance_max))
+                std::cout << metric_diagnostics_.forward_reference_variance_max;
+            else
+                std::cout << "nan";
+            std::cout << " best_ncc_max=";
+            if (std::isfinite(metric_diagnostics_.forward_best_ncc_max))
+                std::cout << metric_diagnostics_.forward_best_ncc_max;
+            else
+                std::cout << "nan";
+            std::cout << " second_ncc_at_best=";
+            if (std::isfinite(metric_diagnostics_.forward_second_ncc_at_best))
+                std::cout << metric_diagnostics_.forward_second_ncc_at_best;
+            else
+                std::cout << "nan";
+            std::cout << " best_minus_second=";
+            if (std::isfinite(metric_diagnostics_.forward_best_minus_second_at_best))
+                std::cout << metric_diagnostics_.forward_best_minus_second_at_best;
+            else
+                std::cout << "nan";
+            std::cout << " winning_disparity=";
+            if (std::isfinite(metric_diagnostics_.forward_winning_disparity_at_best))
+                std::cout << metric_diagnostics_.forward_winning_disparity_at_best;
+            else
+                std::cout << "nan";
+            std::cout << " thresholds(texture="
+                      << touchplus::depth::robust_point_detail::kMinTextureVariance
+                      << ",corr=" << touchplus::depth::robust_point_detail::kMinCorrelation
+                      << ",gap=" << touchplus::depth::robust_point_detail::kMinCorrelationGap
+                      << ") OS_INJECTION=DISABLED\n";
+        }
     }
 
     void remember_sync_snapshot(const AnatomyFrameSyncSnapshotV9& snapshot) {
