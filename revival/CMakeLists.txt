@@ -97,6 +97,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         ole32
         gdi32
         user32
+        windowscodecs
         "${ETRON_DIR}/eSPDI.lib"
         "${ETRON_DIR}/eSPAEAWBCtrl.lib"
     )
@@ -145,6 +146,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         src/fingertip_promotion_gate_v10c.h
         src/fingertip_refiner_v10.h
         src/fingertip_stereo_shadow_v10b.h
+        src/phase2c1g_raw_dense_diagnostic.h
     )
     list(APPEND REVIVAL_TARGETS touchplus_depth_viewer)
     target_compile_features(touchplus_depth_viewer PRIVATE cxx_std_20)
@@ -155,12 +157,12 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${ETRON_DIR}"
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
-    # Preserve the accepted Phase 1C/2A/2B composite runtime, then layer the
-    # Phase 2B.10D authoritative selector behind explicit runtime opt-in. Its
-    # absence leaves the accepted A result and smoothing path unchanged.
+    # Preserve the accepted Phase 1C/2A/2B composite runtime and 2B.10D
+    # selector, then layer Phase 2C.1G raw-dense telemetry strictly after it.
+    # The 2C.1G wrapper includes v10 and changes telemetry only.
     if(MSVC)
         target_compile_options(touchplus_depth_viewer PRIVATE
-            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_surface_frame_runtime_v10.h"
+            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/phase2c1g_raw_dense_diagnostic.h"
         )
     endif()
     target_link_libraries(touchplus_depth_viewer PRIVATE
