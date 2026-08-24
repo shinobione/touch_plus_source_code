@@ -35,6 +35,9 @@
 namespace touchplus::depth {
 namespace raw_dense_diagnostic_detail_v2c1g {
 
+constexpr int kLocalRadiusCellsV2C1G = 12;
+constexpr int kLocalRadiusPxV2C1G = kLocalRadiusCellsV2C1G * kDepthScale;
+
 struct RawDenseDiagnosticV2C1G {
     bool attempted = false;
     std::uint32_t frame = 0;
@@ -79,16 +82,14 @@ inline RawDenseDiagnosticV2C1G evaluate_raw_dense_v2c1g(
     constexpr double uniqueness = 1.08;
     constexpr int inf = std::numeric_limits<int>::max() / 4;
 
-    // Diagnostic locality only: 12 half-resolution cells = 24 full-res pixels.
-    constexpr int local_radius_cells = 12;
-    constexpr int local_radius2 = local_radius_cells * local_radius_cells;
+    constexpr int local_radius2 = kLocalRadiusCellsV2C1G * kLocalRadiusCellsV2C1G;
 
     const int target_gx = fusion.pixel_x / kDepthScale;
     const int target_gy = fusion.pixel_y / kDepthScale;
-    const int min_gx = std::max(0, target_gx - local_radius_cells);
-    const int max_gx = std::min(kDepthWidth - 1, target_gx + local_radius_cells);
-    const int min_gy = std::max(0, target_gy - local_radius_cells);
-    const int max_gy = std::min(kDepthHeight - 1, target_gy + local_radius_cells);
+    const int min_gx = std::max(0, target_gx - kLocalRadiusCellsV2C1G);
+    const int max_gx = std::min(kDepthWidth - 1, target_gx + kLocalRadiusCellsV2C1G);
+    const int min_gy = std::max(0, target_gy - kLocalRadiusCellsV2C1G);
+    const int max_gy = std::min(kDepthHeight - 1, target_gy + kLocalRadiusCellsV2C1G);
 
     const double roi_half_x = surface.spread_x_mm >= 80.0
         ? surface.spread_x_mm * 0.5 + 70.0 : 280.0;
@@ -97,7 +98,8 @@ inline RawDenseDiagnosticV2C1G evaluate_raw_dense_v2c1g(
 
     int nearest_dist2 = std::numeric_limits<int>::max();
     std::vector<double> hs;
-    hs.reserve((local_radius_cells * 2 + 1) * (local_radius_cells * 2 + 1));
+    hs.reserve((kLocalRadiusCellsV2C1G * 2 + 1) *
+               (kLocalRadiusCellsV2C1G * 2 + 1));
 
     for (int gy = min_gy; gy <= max_gy; ++gy) {
         for (int gx = min_gx; gx <= max_gx; ++gx) {
@@ -190,7 +192,7 @@ inline void report_raw_dense_v2c1g(const RawDenseDiagnosticV2C1G& d) {
     print_value(d.local_h_p25_mm);
     std::cout << " H_median=";
     print_value(d.local_h_median_mm);
-    std::cout << " radius_px=" << (local_radius_cells * kDepthScale)
+    std::cout << " radius_px=" << kLocalRadiusPxV2C1G
               << " pre_support_H_floor=BYPASSED"
               << " authoritative=UNCHANGED"
               << " OS_INJECTION=DISABLED\n";
