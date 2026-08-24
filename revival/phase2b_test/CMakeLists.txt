@@ -22,6 +22,9 @@ add_executable(touchplus_contact_semantics_selftest
 add_executable(touchplus_phase2c1a_diagnostic_selftest
     ../src/phase2c1a_diagnostic_selftest.cpp
 )
+add_executable(touchplus_contact_proxy_shadow_v2c1h_selftest
+    ../src/contact_proxy_shadow_v2c1h_selftest.cpp
+)
 
 foreach(target
         touchplus_fingertip_tracker_selftest
@@ -30,7 +33,8 @@ foreach(target
         touchplus_fingertip_promotion_gate_selftest
         touchplus_fingertip_authoritative_selection_selftest
         touchplus_contact_semantics_selftest
-        touchplus_phase2c1a_diagnostic_selftest)
+        touchplus_phase2c1a_diagnostic_selftest
+        touchplus_contact_proxy_shadow_v2c1h_selftest)
     target_compile_features(${target} PRIVATE cxx_std_20)
     target_compile_definitions(${target} PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
@@ -45,3 +49,14 @@ foreach(target
         target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc)
     endif()
 endforeach()
+
+# Phase 2C.1H is diagnostic-only, but its synthetic safety regression must
+# actually execute in both x64 and Win32 tracker CI rather than merely compile.
+# A non-zero exit code fails the enclosing build step.
+add_custom_command(
+    TARGET touchplus_contact_proxy_shadow_v2c1h_selftest
+    POST_BUILD
+    COMMAND "$<TARGET_FILE:touchplus_contact_proxy_shadow_v2c1h_selftest>"
+    COMMENT "Run Phase 2C.1H shadow contact proxy self-test"
+    VERBATIM
+)
