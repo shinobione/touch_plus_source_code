@@ -92,10 +92,10 @@ inline ShadowReverseMatchV2C1F diagnose_right_to_left_low_texture_v2c1f(
 
     min_disp = std::max(kMinDisparity, min_disp);
     max_disp = std::min(kMaxDisparity, max_disp);
-    if (max_disp < min_disp || x + min_disp + kRadius >= kEyeWidth) {
+    if (max_disp < min_disp || x + min_disp + kRadius >= touchplus::depth::kEyeWidth) {
         return out;
     }
-    max_disp = std::min(max_disp, kEyeWidth - kRadius - 1 - x);
+    max_disp = std::min(max_disp, touchplus::depth::kEyeWidth - kRadius - 1 - x);
     if (max_disp < min_disp) {
         return out;
     }
