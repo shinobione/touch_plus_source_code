@@ -118,7 +118,7 @@ void test_latched_contact_releases_safely() {
     if (up_events != 1) fail("lift did not produce exactly one WOULD_UP");
 }
 
-void test_geometry_identity_loss_releases_immediately() {
+void test_geometry_identity_loss_releases_and_requires_fresh_approach() {
     ShadowContactProxyV2C1H proxy;
     std::uint32_t frame = 1;
     for (int i = 0; i < 7; ++i) proxy.update(sample(frame++, 72.0, 76.0, 320, 210 + i));
@@ -132,11 +132,20 @@ void test_geometry_identity_loss_releases_immediately() {
     }
     if (!latched) fail("identity-loss test never reached latch");
 
-    const auto out = proxy.update(sample(
+    const auto released = proxy.update(sample(
         frame++, 18.0, 21.0, 321, 240,
         TargetSourceV2C1H::Geometry));
-    if (out.would_contact || out.event != ShadowContactEventV2C1H::WouldUp) {
+    if (released.would_contact || released.event != ShadowContactEventV2C1H::WouldUp) {
         fail("GEOMETRY identity downgrade did not fail-safe release");
+    }
+
+    for (int i = 0; i < 12; ++i) {
+        const auto out = proxy.update(sample(
+            frame++, 18.5, 21.0, 321, 240,
+            TargetSourceV2C1H::Anatomy));
+        if (out.would_contact || out.event == ShadowContactEventV2C1H::WouldDown) {
+            fail("identity reacquisition re-armed contact without fresh approach");
+        }
     }
 }
 
@@ -148,7 +157,7 @@ int main() {
     test_contaminated_distribution_is_rejected();
     test_geometry_only_never_contacts();
     test_latched_contact_releases_safely();
-    test_geometry_identity_loss_releases_immediately();
+    test_geometry_identity_loss_releases_and_requires_fresh_approach();
     std::cout << "Phase 2C.1H shadow contact proxy self-test PASS\n";
     return 0;
 }
