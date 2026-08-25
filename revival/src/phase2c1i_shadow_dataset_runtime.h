@@ -188,3 +188,8 @@ inline void compute_depth_heatmap_phase2c1i_wrapper(
 } // namespace touchplus::depth
 
 #define compute_depth_heatmap compute_depth_heatmap_phase2c1i_wrapper
+
+// Phase 2C.1J wraps the complete 2C.1I stack from a physically separate IPC
+// channel. The shadow result remains telemetry-only and cannot enter accepted
+// anatomy/fusion/contact behavior.
+#include "phase2c1j_shadow_anatomy_runtime.h"
