@@ -67,9 +67,52 @@ if (-not (Test-Path $acceptedLauncher)) { throw "Missing accepted launcher: $acc
 if (-not (Test-Path $shadowSidecar)) { throw "Missing 2C.1J shadow sidecar: $shadowSidecar" }
 
 if ($SelfTest) {
-    Write-Host "[2C.1J] Running accepted launcher quoting regression..." -ForegroundColor Cyan
-    & powershell.exe -ExecutionPolicy Bypass -File $acceptedLauncher -SelfTestQuoting -Python $Python
-    if ($LASTEXITCODE -ne 0) { throw "Accepted launcher quoting regression failed: $LASTEXITCODE" }
+    # Test this wrapper's own native argument quoting directly. The accepted
+    # launcher has its separate CI regression immediately before this step; do
+    # not nest its Start-Process self-test through Windows PowerShell 5.1.
+    $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) "Touch Plus 2C1J Launcher Test"
+    $testScript = Join-Path $testRoot "shadow sidecar with spaces.py"
+    $testAssets = Join-Path $testRoot "shadow assets with spaces"
+    $testStdout = Join-Path $testRoot "shadow stdout.txt"
+    $testStderr = Join-Path $testRoot "shadow stderr.txt"
+
+    Remove-Item $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $testAssets | Out-Null
+
+    @'
+import pathlib
+import sys
+
+if len(sys.argv) != 3:
+    raise SystemExit("unexpected argv count: %r" % (sys.argv,))
+if sys.argv[1] != "--assets":
+    raise SystemExit("missing --assets: %r" % (sys.argv,))
+if "shadow sidecar with spaces.py" not in pathlib.Path(sys.argv[0]).name:
+    raise SystemExit("script path was split: %r" % (sys.argv,))
+if "shadow assets with spaces" not in pathlib.Path(sys.argv[2]).name:
+    raise SystemExit("assets path was split: %r" % (sys.argv,))
+print("PHASE 2C.1J WRAPPER LAUNCHER SELF-TEST: PASS")
+'@ | Set-Content -Path $testScript -Encoding UTF8
+
+    $testProcess = Start-QuotedPythonProcess `
+        -PythonExe $Python `
+        -ScriptPath $testScript `
+        -AssetsDir $testAssets `
+        -WorkingDir $testRoot `
+        -StdoutPath $testStdout `
+        -StderrPath $testStderr
+
+    $testProcess.WaitForExit()
+    $testProcess.Refresh()
+    $exitCode = $testProcess.ExitCode
+    if ($exitCode -ne 0) {
+        if (Test-Path $testStdout) { Get-Content $testStdout }
+        if (Test-Path $testStderr) { Get-Content $testStderr }
+        throw "Phase 2C.1J wrapper launcher self-test failed: $exitCode"
+    }
+
+    Get-Content $testStdout
+    Remove-Item $testRoot -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "[2C.1J] Launcher wrapper self-test PASS" -ForegroundColor Green
     exit 0
 }
