@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -68,16 +69,16 @@ struct ShadowDatasetRowV2C1I {
     int target_x = -1;
     int target_y = -1;
     int raw_dense_count = 0;
-    double nearest_px = 0.0 / 0.0;
-    double nearest_h_mm = 0.0 / 0.0;
-    double nearest_disparity_px = 0.0 / 0.0;
-    double h_min_mm = 0.0 / 0.0;
-    double h_p25_mm = 0.0 / 0.0;
-    double h_median_mm = 0.0 / 0.0;
-    double spread_mm = 0.0 / 0.0;
-    double approach_drop_mm = 0.0 / 0.0;
-    double plateau_h_span_mm = 0.0 / 0.0;
-    double plateau_motion_px = 0.0 / 0.0;
+    double nearest_px = std::numeric_limits<double>::quiet_NaN();
+    double nearest_h_mm = std::numeric_limits<double>::quiet_NaN();
+    double nearest_disparity_px = std::numeric_limits<double>::quiet_NaN();
+    double h_min_mm = std::numeric_limits<double>::quiet_NaN();
+    double h_p25_mm = std::numeric_limits<double>::quiet_NaN();
+    double h_median_mm = std::numeric_limits<double>::quiet_NaN();
+    double spread_mm = std::numeric_limits<double>::quiet_NaN();
+    double approach_drop_mm = std::numeric_limits<double>::quiet_NaN();
+    double plateau_h_span_mm = std::numeric_limits<double>::quiet_NaN();
+    double plateau_motion_px = std::numeric_limits<double>::quiet_NaN();
     bool trusted_target = false;
     bool dense_enough = false;
     bool low_band = false;
