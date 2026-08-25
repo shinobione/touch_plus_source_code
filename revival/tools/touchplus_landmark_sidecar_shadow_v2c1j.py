@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Phase 2C.1J diagnostic-only ungated anatomy sidecar.
+"""Phase 2C.1J.1 diagnostic-only ungated anatomy sidecar.
 
 This process uses completely separate named shared-memory channels from the
 accepted Phase 2B.9C sidecar. It may ignore the accepted hand_valid bit only on
 that shadow channel so we can answer one physical question: does OpenCV Zoo
 still see the index when the accepted V8/V9 hand gate has already failed?
 
+2C.1J.1 is intentionally low-impact: the C++ publisher only sends hand-loss
+probe frames at ~5 Hz, and this shadow process caps OpenCV to one worker thread.
 The result is telemetry only. It is never read by the accepted V9 anatomy
 bridge, fusion, stereo, contact semantics or OS output.
 """
@@ -21,6 +23,8 @@ import touchplus_landmark_sidecar_live as live
 
 SHADOW_FRAME_MAP_NAME = r"Local\TouchPlusRevival2C1J_ShadowFrame_v1"
 SHADOW_RESULT_MAP_NAME = r"Local\TouchPlusRevival2C1J_ShadowResult_v1"
+SHADOW_OPENCV_THREADS = 1
+DEFAULT_POLL_MS = 12.0
 
 
 def _ungated_copy(frame: live.LiveFrame) -> live.LiveFrame:
@@ -64,6 +68,10 @@ def run_self_test() -> int:
           "shadow result map differs from accepted result map")
     check(SHADOW_FRAME_MAP_NAME != SHADOW_RESULT_MAP_NAME,
           "shadow frame/result maps differ")
+    check(SHADOW_OPENCV_THREADS == 1,
+          "shadow OpenCV worker budget is capped to one thread")
+    check(DEFAULT_POLL_MS >= 10.0,
+          "shadow idle polling is intentionally relaxed")
 
     silhouette = np.zeros((live.FRAME_HEIGHT, live.FRAME_WIDTH), dtype=np.uint8)
     silhouette[120:180, 250:390] = 1
@@ -94,23 +102,26 @@ def run_self_test() -> int:
           blocked_bg.get("reason_code") == 101,
           "background-not-ready still fails closed before model use")
 
+    print("probe_policy=HAND_LOSS_ONLY_1_IN_6")
     print("accepted_pipeline_consumes_shadow=NO")
     print("shadow_only=YES")
     print("authoritative=UNCHANGED")
     print("OS_INJECTION=DISABLED")
     if ok:
-        print("Phase 2C.1J ungated shadow sidecar self-test PASS")
+        print("Phase 2C.1J.1 lightweight ungated shadow sidecar self-test PASS")
         return 0
-    print("Phase 2C.1J ungated shadow sidecar self-test FAIL")
+    print("Phase 2C.1J.1 lightweight ungated shadow sidecar self-test FAIL")
     return 1
 
 
 def run_live(assets: pathlib.Path, poll_ms: float) -> int:
     if sys.platform != "win32":
         raise RuntimeError(
-            "Phase 2C.1J shadow sidecar currently requires Windows named shared memory"
+            "Phase 2C.1J.1 shadow sidecar currently requires Windows named shared memory"
         )
 
+    import cv2 as cv
+    cv.setNumThreads(SHADOW_OPENCV_THREADS)
     palm_detector, handpose_model = live.base._load_zoo(assets)
     frame_map = mmap.mmap(
         -1,
@@ -125,8 +136,10 @@ def run_live(assets: pathlib.Path, poll_ms: float) -> int:
         access=mmap.ACCESS_WRITE,
     )
     print(
-        "[ANATOMY_SHADOW_SIDECAR] Phase 2C.1J online"
+        "[ANATOMY_SHADOW_SIDECAR] Phase 2C.1J.1 online"
         " | IPC=SEPARATE"
+        " | publisher=HAND_LOSS_ONLY_1_IN_6"
+        f" | opencv_threads={SHADOW_OPENCV_THREADS}"
         " | accepted_hand_valid_ignored=SHADOW_ONLY"
         " | accepted_pipeline_consumes_shadow=NO"
         " | model_Z_metric_use=DISABLED"
@@ -161,31 +174,30 @@ def run_live(assets: pathlib.Path, poll_ms: float) -> int:
 
             live._write_result_dict(result_map, result)
 
-            if frame.frame_id % 10 == 0:
-                status = int(result.get("status", live.STATUS_ERROR))
-                if status == live.STATUS_GUIDED:
-                    print(
-                        f"[ANATOMY_SHADOW_SIDECAR] frame={frame.frame_id}"
-                        f" accepted_hand={1 if accepted_hand else 0}"
-                        " status=GUIDED_DISTAL"
-                        f" src={result.get('source')}"
-                        f" tip={result.get('tip_x'):.1f},{result.get('tip_y'):.1f}"
-                        f" aq={result.get('axis_quality'):.2f}"
-                        f" conf={result.get('hand_confidence'):.3f}"
-                        " accepted_pipeline_consumes_shadow=NO"
-                        " shadow_only=YES",
-                        flush=True,
-                    )
-                else:
-                    print(
-                        f"[ANATOMY_SHADOW_SIDECAR] frame={frame.frame_id}"
-                        f" accepted_hand={1 if accepted_hand else 0}"
-                        f" status={status}"
-                        f" reason_code={result.get('reason_code', 0)}"
-                        " accepted_pipeline_consumes_shadow=NO"
-                        " shadow_only=YES",
-                        flush=True,
-                    )
+            status = int(result.get("status", live.STATUS_ERROR))
+            if status == live.STATUS_GUIDED:
+                print(
+                    f"[ANATOMY_SHADOW_SIDECAR] frame={frame.frame_id}"
+                    f" accepted_hand={1 if accepted_hand else 0}"
+                    " status=GUIDED_DISTAL"
+                    f" src={result.get('source')}"
+                    f" tip={result.get('tip_x'):.1f},{result.get('tip_y'):.1f}"
+                    f" aq={result.get('axis_quality'):.2f}"
+                    f" conf={result.get('hand_confidence'):.3f}"
+                    " accepted_pipeline_consumes_shadow=NO"
+                    " shadow_only=YES",
+                    flush=True,
+                )
+            elif frame.frame_id % 30 == 0:
+                print(
+                    f"[ANATOMY_SHADOW_SIDECAR] frame={frame.frame_id}"
+                    f" accepted_hand={1 if accepted_hand else 0}"
+                    f" status={status}"
+                    f" reason_code={result.get('reason_code', 0)}"
+                    " accepted_pipeline_consumes_shadow=NO"
+                    " shadow_only=YES",
+                    flush=True,
+                )
     except KeyboardInterrupt:
         return 0
     finally:
@@ -195,12 +207,12 @@ def run_live(assets: pathlib.Path, poll_ms: float) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="TouchPlus Phase 2C.1J ungated shadow anatomy sidecar"
+        description="TouchPlus Phase 2C.1J.1 lightweight ungated shadow anatomy sidecar"
     )
     parser.add_argument(
         "--assets", type=pathlib.Path, default=pathlib.Path("landmark-assets")
     )
-    parser.add_argument("--poll-ms", type=float, default=4.0)
+    parser.add_argument("--poll-ms", type=float, default=DEFAULT_POLL_MS)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     return run_self_test() if args.self_test else run_live(args.assets, args.poll_ms)
