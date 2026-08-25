@@ -161,3 +161,9 @@ inline void compute_depth_heatmap_phase2c1h_wrapper(
 } // namespace touchplus::depth
 
 #define compute_depth_heatmap compute_depth_heatmap_phase2c1h_wrapper
+
+// 2C.1I is layered after the complete 2C.1H wrapper. Because this file is the
+// existing forced include for the live depth viewer, this preserves the build
+// plumbing while allowing 2C.1I to wrap 2C.1H without changing authoritative
+// runtime ownership.
+#include "phase2c1i_shadow_dataset_runtime.h"
