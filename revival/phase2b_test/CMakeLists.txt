@@ -28,6 +28,10 @@ add_executable(touchplus_contact_proxy_shadow_v2c1h_selftest
 add_executable(touchplus_phase2c1i_shadow_dataset_selftest
     ../src/phase2c1i_shadow_dataset_selftest.cpp
 )
+add_executable(touchplus_phase2c1j_shadow_anatomy_selftest
+    ../src/fingertip_anatomy_shadow_v2c1j_selftest.cpp
+    ../src/fingertip_anatomy_shadow_ipc_v2c1j.h
+)
 
 foreach(target
         touchplus_fingertip_tracker_selftest
@@ -38,7 +42,8 @@ foreach(target
         touchplus_contact_semantics_selftest
         touchplus_phase2c1a_diagnostic_selftest
         touchplus_contact_proxy_shadow_v2c1h_selftest
-        touchplus_phase2c1i_shadow_dataset_selftest)
+        touchplus_phase2c1i_shadow_dataset_selftest
+        touchplus_phase2c1j_shadow_anatomy_selftest)
     target_compile_features(${target} PRIVATE cxx_std_20)
     target_compile_definitions(${target} PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
@@ -73,5 +78,16 @@ add_custom_command(
     POST_BUILD
     COMMAND "$<TARGET_FILE:touchplus_phase2c1i_shadow_dataset_selftest>"
     COMMENT "Run Phase 2C.1I shadow dataset CSV self-test"
+    VERBATIM
+)
+
+# Phase 2C.1J must prove that the ungated anatomy probe has physically separate
+# frame/result channels and remains fail-closed by default. Execute the check in
+# both x64 and Win32 tracker builds.
+add_custom_command(
+    TARGET touchplus_phase2c1j_shadow_anatomy_selftest
+    POST_BUILD
+    COMMAND "$<TARGET_FILE:touchplus_phase2c1j_shadow_anatomy_selftest>"
+    COMMENT "Run Phase 2C.1J isolated shadow anatomy IPC self-test"
     VERBATIM
 )
