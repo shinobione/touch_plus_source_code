@@ -51,6 +51,22 @@ target_include_directories(touchplus_surface_frame_selftest PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
+# Phase 2C.1H shadow contact proxy logic is hardware-independent. Keep a
+# deterministic x64 + Win32 regression so the diagnostic candidate cannot
+# silently become eager while runtime contact behavior remains untouched.
+add_executable(touchplus_contact_proxy_shadow_v2c1h_selftest
+    src/contact_proxy_shadow_v2c1h_selftest.cpp
+    src/contact_proxy_shadow_v2c1h.h
+)
+list(APPEND REVIVAL_TARGETS touchplus_contact_proxy_shadow_v2c1h_selftest)
+target_compile_features(touchplus_contact_proxy_shadow_v2c1h_selftest PRIVATE cxx_std_20)
+target_compile_definitions(touchplus_contact_proxy_shadow_v2c1h_selftest PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+)
+target_include_directories(touchplus_contact_proxy_shadow_v2c1h_selftest PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
 # The recovered Etron control SDK is 32-bit only. Anything that combines
 # vendor unlock/control with live video therefore gets a dedicated Win32 build.
 if(CMAKE_SIZEOF_VOID_P EQUAL 4)
@@ -97,6 +113,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         ole32
         gdi32
         user32
+        windowscodecs
         "${ETRON_DIR}/eSPDI.lib"
         "${ETRON_DIR}/eSPAEAWBCtrl.lib"
     )
@@ -139,10 +156,15 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         src/depth_surface_frame.h
         src/depth_surface_frame_runtime.h
         src/depth_surface_frame_runtime_v10.h
+        src/contact_state_machine_v2c1.h
+        src/phase2c1a_diagnostic.h
         src/fingertip_authoritative_selection_v10d.h
         src/fingertip_promotion_gate_v10c.h
         src/fingertip_refiner_v10.h
         src/fingertip_stereo_shadow_v10b.h
+        src/phase2c1g_raw_dense_diagnostic.h
+        src/contact_proxy_shadow_v2c1h.h
+        src/phase2c1h_shadow_contact_runtime.h
     )
     list(APPEND REVIVAL_TARGETS touchplus_depth_viewer)
     target_compile_features(touchplus_depth_viewer PRIVATE cxx_std_20)
@@ -153,12 +175,13 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${ETRON_DIR}"
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
-    # Preserve the accepted Phase 1C/2A/2B composite runtime, then layer the
-    # Phase 2B.10D authoritative selector behind explicit runtime opt-in. Its
-    # absence leaves the accepted A result and smoothing path unchanged.
+    # Preserve the accepted Phase 1C/2A/2B composite runtime and 2B.10D
+    # selector, then layer 2C.1G.1 raw-dense telemetry and the 2C.1H shadow-only
+    # contact proxy after it. No shadow output is consumed by authoritative
+    # tracking/contact behavior.
     if(MSVC)
         target_compile_options(touchplus_depth_viewer PRIVATE
-            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_surface_frame_runtime_v10.h"
+            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/phase2c1h_shadow_contact_runtime.h"
         )
     endif()
     target_link_libraries(touchplus_depth_viewer PRIVATE

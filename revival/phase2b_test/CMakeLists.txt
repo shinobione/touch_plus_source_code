@@ -16,13 +16,34 @@ add_executable(touchplus_fingertip_promotion_gate_selftest
 add_executable(touchplus_fingertip_authoritative_selection_selftest
     ../src/fingertip_authoritative_selection_v10d_selftest.cpp
 )
+add_executable(touchplus_contact_semantics_selftest
+    ../src/contact_state_machine_v2c1_selftest.cpp
+)
+add_executable(touchplus_phase2c1a_diagnostic_selftest
+    ../src/phase2c1a_diagnostic_selftest.cpp
+)
+add_executable(touchplus_contact_proxy_shadow_v2c1h_selftest
+    ../src/contact_proxy_shadow_v2c1h_selftest.cpp
+)
+add_executable(touchplus_phase2c1i_shadow_dataset_selftest
+    ../src/phase2c1i_shadow_dataset_selftest.cpp
+)
+add_executable(touchplus_phase2c1j_shadow_anatomy_selftest
+    ../src/fingertip_anatomy_shadow_v2c1j_selftest.cpp
+    ../src/fingertip_anatomy_shadow_ipc_v2c1j.h
+)
 
 foreach(target
         touchplus_fingertip_tracker_selftest
         touchplus_fingertip_fusion_selftest
         touchplus_fingertip_refiner_selftest
         touchplus_fingertip_promotion_gate_selftest
-        touchplus_fingertip_authoritative_selection_selftest)
+        touchplus_fingertip_authoritative_selection_selftest
+        touchplus_contact_semantics_selftest
+        touchplus_phase2c1a_diagnostic_selftest
+        touchplus_contact_proxy_shadow_v2c1h_selftest
+        touchplus_phase2c1i_shadow_dataset_selftest
+        touchplus_phase2c1j_shadow_anatomy_selftest)
     target_compile_features(${target} PRIVATE cxx_std_20)
     target_compile_definitions(${target} PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
@@ -37,3 +58,36 @@ foreach(target
         target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc)
     endif()
 endforeach()
+
+# Phase 2C.1H is diagnostic-only, but its synthetic safety regression must
+# actually execute in both x64 and Win32 tracker CI rather than merely compile.
+# A non-zero exit code fails the enclosing build step.
+add_custom_command(
+    TARGET touchplus_contact_proxy_shadow_v2c1h_selftest
+    POST_BUILD
+    COMMAND "$<TARGET_FILE:touchplus_contact_proxy_shadow_v2c1h_selftest>"
+    COMMENT "Run Phase 2C.1H shadow contact proxy self-test"
+    VERBATIM
+)
+
+# Phase 2C.1I verifies the numeric non-conflicting label scheme, exact CSV
+# safety columns, preservation of invalid per-frame rows and shadow-only
+# ownership in both x64 and Win32 tracker builds.
+add_custom_command(
+    TARGET touchplus_phase2c1i_shadow_dataset_selftest
+    POST_BUILD
+    COMMAND "$<TARGET_FILE:touchplus_phase2c1i_shadow_dataset_selftest>"
+    COMMENT "Run Phase 2C.1I shadow dataset CSV self-test"
+    VERBATIM
+)
+
+# Phase 2C.1J must prove that the ungated anatomy probe has physically separate
+# frame/result channels and remains fail-closed by default. Execute the check in
+# both x64 and Win32 tracker builds.
+add_custom_command(
+    TARGET touchplus_phase2c1j_shadow_anatomy_selftest
+    POST_BUILD
+    COMMAND "$<TARGET_FILE:touchplus_phase2c1j_shadow_anatomy_selftest>"
+    COMMENT "Run Phase 2C.1J isolated shadow anatomy IPC self-test"
+    VERBATIM
+)

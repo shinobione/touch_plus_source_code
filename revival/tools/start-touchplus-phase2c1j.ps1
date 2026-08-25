@@ -5,7 +5,7 @@ param(
     [string]$BenchCache = $env:TOUCHPLUS_BENCH_CACHE,
     [switch]$SkipSetup,
     [switch]$EnableHybridPromotion,
-    [switch]$SelfTestQuoting
+    [switch]$SelfTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,13 +26,8 @@ function Start-QuotedPythonProcess(
     [string]$StdoutPath,
     [string]$StderrPath
 ) {
-    # Windows PowerShell 5.1 Start-Process joins ArgumentList entries into a
-    # single native command line. Passing raw paths therefore breaks as soon
-    # as the kit lives below e.g. "F:\Google Drive\...". Build the native
-    # argument line explicitly and quote every path-bearing argument.
     $argumentLine = (Quote-NativeArgument $ScriptPath) +
         ' --assets ' + (Quote-NativeArgument $AssetsDir)
-
     return Start-Process `
         -FilePath $PythonExe `
         -ArgumentList $argumentLine `
@@ -45,38 +40,41 @@ function Start-QuotedPythonProcess(
 
 function Mount-BenchCacheDirectory([string]$Name) {
     if ([string]::IsNullOrWhiteSpace($BenchCache)) { return }
-
     $cacheRoot = if ([System.IO.Path]::IsPathRooted($BenchCache)) {
         $BenchCache
-    }
-    else {
+    } else {
         Join-Path $root $BenchCache
     }
     $source = Join-Path $cacheRoot $Name
     $destination = Join-Path $root $Name
-
     if (Test-Path $destination) { return }
-    if (-not (Test-Path $source)) {
-        Write-Host "[BENCH CACHE] Missing cached directory: $source" -ForegroundColor Yellow
-        return
-    }
-
+    if (-not (Test-Path $source)) { return }
     try {
         New-Item -ItemType Junction -Path $destination -Target $source -ErrorAction Stop | Out-Null
         Write-Host "[BENCH CACHE] Mounted $Name -> $source" -ForegroundColor DarkCyan
     }
     catch {
-        Write-Host "[BENCH CACHE] Junction unavailable for $Name; copying cached directory once..." -ForegroundColor Yellow
+        Write-Host "[BENCH CACHE] Junction unavailable for $Name; copying cached directory..." -ForegroundColor Yellow
         Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
     }
 }
 
-if ($SelfTestQuoting) {
-    $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) "Touch Plus Launcher Quoting Test"
-    $testScript = Join-Path $testRoot "sidecar probe with spaces.py"
-    $testAssets = Join-Path $testRoot "assets folder with spaces"
-    $testStdout = Join-Path $testRoot "stdout log.txt"
-    $testStderr = Join-Path $testRoot "stderr log.txt"
+$acceptedLauncher = Join-Path $root "start-touchplus-phase2b9c.ps1"
+$shadowSidecar = Join-Path $root "touchplus_landmark_sidecar_shadow_v2c1j.py"
+$setup = Join-Path $root "setup-touchplus-landmark-probe.ps1"
+
+if (-not (Test-Path $acceptedLauncher)) { throw "Missing accepted launcher: $acceptedLauncher" }
+if (-not (Test-Path $shadowSidecar)) { throw "Missing 2C.1J shadow sidecar: $shadowSidecar" }
+
+if ($SelfTest) {
+    # Test this wrapper's own native argument quoting directly. The accepted
+    # launcher has its separate CI regression immediately before this step; do
+    # not nest its Start-Process self-test through Windows PowerShell 5.1.
+    $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) "Touch Plus 2C1J Launcher Test"
+    $testScript = Join-Path $testRoot "shadow sidecar with spaces.py"
+    $testAssets = Join-Path $testRoot "shadow assets with spaces"
+    $testStdout = Join-Path $testRoot "shadow stdout.txt"
+    $testStderr = Join-Path $testRoot "shadow stderr.txt"
 
     Remove-Item $testRoot -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path $testAssets | Out-Null
@@ -89,11 +87,11 @@ if len(sys.argv) != 3:
     raise SystemExit("unexpected argv count: %r" % (sys.argv,))
 if sys.argv[1] != "--assets":
     raise SystemExit("missing --assets: %r" % (sys.argv,))
-if "sidecar probe with spaces.py" not in pathlib.Path(sys.argv[0]).name:
+if "shadow sidecar with spaces.py" not in pathlib.Path(sys.argv[0]).name:
     raise SystemExit("script path was split: %r" % (sys.argv,))
-if "assets folder with spaces" not in pathlib.Path(sys.argv[2]).name:
+if "shadow assets with spaces" not in pathlib.Path(sys.argv[2]).name:
     raise SystemExit("assets path was split: %r" % (sys.argv,))
-print("PHASE 2B.9C LAUNCHER QUOTING SELF-TEST: PASS")
+print("PHASE 2C.1J WRAPPER LAUNCHER SELF-TEST: PASS")
 '@ | Set-Content -Path $testScript -Encoding UTF8
 
     $testProcess = Start-QuotedPythonProcess `
@@ -105,38 +103,29 @@ print("PHASE 2B.9C LAUNCHER QUOTING SELF-TEST: PASS")
         -StderrPath $testStderr
 
     $testProcess.WaitForExit()
-    if ($testProcess.ExitCode -ne 0) {
+    $testProcess.Refresh()
+    $exitCode = $testProcess.ExitCode
+    if ($exitCode -ne 0) {
         if (Test-Path $testStdout) { Get-Content $testStdout }
         if (Test-Path $testStderr) { Get-Content $testStderr }
-        throw "Phase 2B.9C launcher quoting self-test failed: $($testProcess.ExitCode)"
+        throw "Phase 2C.1J wrapper launcher self-test failed: $exitCode"
     }
 
     Get-Content $testStdout
     Remove-Item $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "[2C.1J] Launcher wrapper self-test PASS" -ForegroundColor Green
     exit 0
 }
 
-$tracker = Join-Path $root "touchplus_phase2b_tracker.exe"
-$sidecar = Join-Path $root "touchplus_landmark_sidecar_live.py"
-$setup = Join-Path $root "setup-touchplus-landmark-probe.ps1"
-
-# Optional reusable local bench cache. The cache itself is never committed.
-# When configured, fresh GitHub artifacts can mount the heavy venv, model
-# assets and per-setup surface frame automatically instead of asking the user
-# to copy the same three directories into every extracted kit.
 Mount-BenchCacheDirectory ".touchplus-landmark-venv"
 Mount-BenchCacheDirectory "landmark-assets"
-Mount-BenchCacheDirectory "surface"
 
 $venvPath = if ([System.IO.Path]::IsPathRooted($Venv)) { $Venv } else { Join-Path $root $Venv }
 $assetsPath = if ([System.IO.Path]::IsPathRooted($Assets)) { $Assets } else { Join-Path $root $Assets }
 $venvPython = Join-Path $venvPath "Scripts\python.exe"
 
-if (-not (Test-Path $tracker)) { throw "Missing tracker: $tracker" }
-if (-not (Test-Path $sidecar)) { throw "Missing sidecar: $sidecar" }
-
 if (-not $SkipSetup -and ((-not (Test-Path $venvPython)) -or (-not (Test-Path $assetsPath)))) {
-    Write-Host "[2B.9C] Landmark environment/assets missing; bootstrapping OpenCV Zoo..." -ForegroundColor Cyan
+    Write-Host "[2C.1J] Landmark environment/assets missing; bootstrapping OpenCV Zoo..." -ForegroundColor Cyan
     if (-not (Test-Path $setup)) { throw "Missing setup script: $setup" }
     & powershell.exe -ExecutionPolicy Bypass -File $setup -Python $Python -Assets $Assets -Venv $Venv
     if ($LASTEXITCODE -ne 0) { throw "Landmark setup failed: $LASTEXITCODE" }
@@ -145,51 +134,60 @@ if (-not $SkipSetup -and ((-not (Test-Path $venvPython)) -or (-not (Test-Path $a
 if (-not (Test-Path $venvPython)) { throw "Missing venv Python: $venvPython" }
 if (-not (Test-Path $assetsPath)) { throw "Missing landmark assets: $assetsPath" }
 
-$stdout = Join-Path $root "touchplus-anatomy-sidecar.log"
-$stderr = Join-Path $root "touchplus-anatomy-sidecar-error.log"
-Remove-Item $stdout,$stderr -Force -ErrorAction SilentlyContinue
+$shadowStdout = Join-Path $root "touchplus-anatomy-shadow-sidecar.log"
+$shadowStderr = Join-Path $root "touchplus-anatomy-shadow-sidecar-error.log"
+Remove-Item $shadowStdout,$shadowStderr -Force -ErrorAction SilentlyContinue
 
-Write-Host "[2B.9C] Starting anatomical sidecar..." -ForegroundColor Cyan
-$sidecarProcess = Start-QuotedPythonProcess `
+Write-Host "[2C.1J] Starting isolated ungated SHADOW anatomy sidecar..." -ForegroundColor Magenta
+$shadowProcess = Start-QuotedPythonProcess `
     -PythonExe $venvPython `
-    -ScriptPath $sidecar `
+    -ScriptPath $shadowSidecar `
     -AssetsDir $assetsPath `
     -WorkingDir $root `
-    -StdoutPath $stdout `
-    -StderrPath $stderr
+    -StdoutPath $shadowStdout `
+    -StderrPath $shadowStderr
 
 Start-Sleep -Milliseconds 400
-if ($sidecarProcess.HasExited) {
-    Write-Host "[2B.9C] Sidecar exited early." -ForegroundColor Red
-    if (Test-Path $stdout) { Get-Content $stdout }
-    if (Test-Path $stderr) { Get-Content $stderr }
-    throw "Anatomy sidecar failed to start."
+if ($shadowProcess.HasExited) {
+    Write-Host "[2C.1J] Shadow sidecar exited early." -ForegroundColor Red
+    if (Test-Path $shadowStdout) { Get-Content $shadowStdout }
+    if (Test-Path $shadowStderr) { Get-Content $shadowStderr }
+    throw "Phase 2C.1J shadow anatomy sidecar failed to start."
 }
 
-$promotionMode = if ($EnableHybridPromotion) { "ENABLED" } else { "DISABLED" }
-Write-Host "[2B.10D] Starting Touch+ tracker | hybrid promotion=$promotionMode. Close it with Q/ESC; sidecar will stop automatically." -ForegroundColor Green
-Write-Host "[2B.9C] Sidecar log: $stdout"
+Write-Host "[2C.1J] Shadow log: $shadowStdout" -ForegroundColor DarkCyan
+Write-Host "[2C.1J] IPC=SEPARATE | accepted_pipeline_consumes_shadow=NO | OS_INJECTION=DISABLED" -ForegroundColor Green
+
+$baseArgs = @(
+    "-ExecutionPolicy", "Bypass",
+    "-File", $acceptedLauncher,
+    "-Python", $Python,
+    "-Assets", $assetsPath,
+    "-Venv", $venvPath,
+    "-SkipSetup"
+)
+if (-not [string]::IsNullOrWhiteSpace($BenchCache)) {
+    $baseArgs += @("-BenchCache", $BenchCache)
+}
+if ($EnableHybridPromotion) {
+    $baseArgs += "-EnableHybridPromotion"
+}
 
 try {
-    if ($EnableHybridPromotion) {
-        & $tracker --enable-hybrid-promotion
-    }
-    else {
-        & $tracker
-    }
+    & powershell.exe @baseArgs
     $trackerExit = $LASTEXITCODE
 }
 finally {
-    if ($sidecarProcess -and -not $sidecarProcess.HasExited) {
-        Stop-Process -Id $sidecarProcess.Id -Force -ErrorAction SilentlyContinue
-        $sidecarProcess.WaitForExit(3000) | Out-Null
+    if ($shadowProcess -and -not $shadowProcess.HasExited) {
+        Stop-Process -Id $shadowProcess.Id -Force -ErrorAction SilentlyContinue
+        $shadowProcess.WaitForExit(3000) | Out-Null
     }
 }
 
-if (Test-Path $stderr) {
-    $err = Get-Content $stderr -Raw
+if (Test-Path $shadowStderr) {
+    $err = Get-Content $shadowStderr -Raw
     if (-not [string]::IsNullOrWhiteSpace($err)) {
-        Write-Host "[2B.9C] Sidecar stderr:" -ForegroundColor Yellow
+        Write-Host "[2C.1J] Shadow sidecar stderr:" -ForegroundColor Yellow
         Write-Host $err
     }
 }

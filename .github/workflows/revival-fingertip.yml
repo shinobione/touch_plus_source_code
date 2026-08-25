@@ -56,6 +56,18 @@ jobs:
           & "build/fingertip-x64/Release/touchplus_fingertip_authoritative_selection_selftest.exe"
           if ($LASTEXITCODE -ne 0) { throw "Phase 2B.10D authoritative selection x64 self-test failed: $LASTEXITCODE" }
 
+      - name: Run Phase 2C.1 contact semantics self-test x64
+        shell: pwsh
+        run: |
+          & "build/fingertip-x64/Release/touchplus_contact_semantics_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1 contact semantics x64 self-test failed: $LASTEXITCODE" }
+
+      - name: Run Phase 2C.1A diagnostic CSV self-test x64
+        shell: pwsh
+        run: |
+          & "build/fingertip-x64/Release/touchplus_phase2c1a_diagnostic_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1A diagnostic CSV x64 self-test failed: $LASTEXITCODE" }
+
   landmark-live-sidecar-probe:
     runs-on: windows-latest
     steps:
@@ -67,13 +79,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Verify launcher quoting from paths with spaces
+      - name: Verify accepted launcher quoting from paths with spaces
         shell: pwsh
         run: |
           & revival/tools/start-touchplus-phase2b9c.ps1 `
             -SelfTestQuoting `
             -Python (Get-Command python).Source
           if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9C launcher path quoting regression failed: $LASTEXITCODE" }
+
+      - name: Verify Phase 2C.1J wrapper launcher
+        shell: pwsh
+        run: |
+          & revival/tools/start-touchplus-phase2c1j.ps1 `
+            -SelfTest `
+            -Python (Get-Command python).Source
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1J wrapper launcher regression failed: $LASTEXITCODE" }
 
       - name: Bootstrap official OpenCV Zoo landmark assets
         shell: pwsh
@@ -98,6 +118,14 @@ jobs:
             revival/tools/touchplus_landmark_sidecar_live.py `
             --self-test
           if ($LASTEXITCODE -ne 0) { throw "Phase 2B.9C live sidecar self-test failed: $LASTEXITCODE" }
+
+      - name: Run Phase 2C.1J ungated shadow sidecar isolation self-test
+        shell: pwsh
+        run: |
+          & "build/landmark-venv/Scripts/python.exe" `
+            revival/tools/touchplus_landmark_sidecar_shadow_v2c1j.py `
+            --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1J shadow sidecar isolation self-test failed: $LASTEXITCODE" }
 
       - name: Run OpenCV Zoo model-load smoke
         shell: pwsh
@@ -163,6 +191,18 @@ jobs:
           & "build/fingertip-x86/Release/touchplus_fingertip_authoritative_selection_selftest.exe"
           if ($LASTEXITCODE -ne 0) { throw "Phase 2B.10D authoritative selection Win32 self-test failed: $LASTEXITCODE" }
 
+      - name: Run Phase 2C.1 contact semantics self-test Win32
+        shell: pwsh
+        run: |
+          & "build/fingertip-x86/Release/touchplus_contact_semantics_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1 contact semantics Win32 self-test failed: $LASTEXITCODE" }
+
+      - name: Run Phase 2C.1A diagnostic CSV self-test Win32
+        shell: pwsh
+        run: |
+          & "build/fingertip-x86/Release/touchplus_phase2c1a_diagnostic_selftest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 2C.1A diagnostic CSV Win32 self-test failed: $LASTEXITCODE" }
+
       - name: Configure Revival Win32
         run: cmake -S revival -B build/revival-x86 -A Win32
 
@@ -184,11 +224,11 @@ jobs:
           & $exe --self-test $cal
           if ($LASTEXITCODE -ne 0) { throw "Phase 1C depth self-test regressed: $LASTEXITCODE" }
 
-      - name: Prepare Phase 2B.10D gated promotion diagnostic kit
+      - name: Prepare Phase 2C.1J shadow-anatomy physical-smoke kit
         shell: pwsh
         run: |
           $src = "build/revival-x86/Release"
-          $kit = "build/touchplus-phase2b10d-gated-promotion"
+          $kit = "build/touchplus-phase2c1j-shadow-anatomy"
           New-Item -ItemType Directory -Force -Path $kit | Out-Null
           New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
 
@@ -201,8 +241,10 @@ jobs:
           Copy-Item "revival/tools/touchplus_landmark_probe.py" "$kit/touchplus_landmark_probe.py"
           Copy-Item "revival/tools/touchplus_landmark_probe_b91.py" "$kit/touchplus_landmark_probe_b91.py"
           Copy-Item "revival/tools/touchplus_landmark_sidecar_live.py" "$kit/touchplus_landmark_sidecar_live.py"
+          Copy-Item "revival/tools/touchplus_landmark_sidecar_shadow_v2c1j.py" "$kit/touchplus_landmark_sidecar_shadow_v2c1j.py"
           Copy-Item "revival/tools/setup-touchplus-landmark-probe.ps1" "$kit/setup-touchplus-landmark-probe.ps1"
           Copy-Item "revival/tools/start-touchplus-phase2b9c.ps1" "$kit/start-touchplus-phase2b9c.ps1"
+          Copy-Item "revival/tools/start-touchplus-phase2c1j.ps1" "$kit/start-touchplus-phase2c1j.ps1"
 
           Copy-Item "revival/notes/phase2b9b-physical-smoke-2026-08-20.md" "$kit/README-2B9B-physical-smoke.md"
           Copy-Item "revival/notes/phase2b9b1-roi-reacquisition.md" "$kit/README-2B9B1-roi-reacquisition.md"
@@ -212,26 +254,46 @@ jobs:
           Copy-Item "revival/notes/phase2b10b-shadow-stereo.md" "$kit/README-2B10B-shadow-stereo.md"
           Copy-Item "revival/notes/phase2b10c-counterfactual-promotion-gate.md" "$kit/README-2B10C-counterfactual-gate.md"
           Copy-Item "revival/notes/phase2b10d-gated-authoritative-promotion.md" "$kit/README-2B10D-gated-promotion.md"
+          Copy-Item "revival/notes/phase2c1-contact-semantics.md" "$kit/README-2C1-contact-semantics.md"
+          Copy-Item "revival/notes/phase2c1j-ungated-shadow-anatomy.md" "$kit/README-2C1J-shadow-anatomy.md"
 
           @'
-          TouchPlus Revival Phase 2B.10D - gated authoritative B promotion
+          TouchPlus Revival Phase 2C.1J - ungated SHADOW anatomy probe
 
-          Default (accepted A unchanged):
-            .\touchplus_phase2b_tracker.exe
+          Launch this kit with:
+            powershell.exe -ExecutionPolicy Bypass -File .\start-touchplus-phase2c1j.ps1
 
-          Experimental physical smoke opt-in:
-            .\touchplus_phase2b_tracker.exe --enable-hybrid-promotion
+          Ground-truth labels (diagnostic only):
+            1 = HIGH
+            2 = NEAR
+            3 = CONTACT
+            0 = NONE
 
-          Promotion is non-persistent and disabled again on the next launch
-          unless the flag is supplied. OS injection remains disabled.
-          '@ | Set-Content -Encoding UTF8 "$kit/README-2B10D-launch.txt"
+          Do NOT use H/N/C for labels; H and C are historical Phase 2A shortcuts.
+
+          Key telemetry:
+            [ANATOMY_SHADOW]
+            accepted_hand=0|1
+            accepted_anatomy=...
+            shadow_status=GUIDED_DISTAL|...
+            tip=x,y
+            accepted_pipeline_consumes_shadow=NO
+
+          Output files beside the runtime:
+            touchplus-phase2c1j-shadow-anatomy-*.csv
+            touchplus-phase2c1i-shadow-dataset-*.csv
+            touchplus-anatomy-shadow-sidecar.log
+
+          Phase 2C.1J is diagnostic-only. Shadow anatomy never enters accepted
+          V9 fusion, stereo, contact semantics or OS output. PR remains Draft / DO NOT MERGE.
+          '@ | Set-Content -Encoding UTF8 "$kit/README-2C1J-LAUNCH.txt"
 
           Get-ChildItem -Recurse $kit | Select-Object FullName,Length | Format-Table -AutoSize
 
-      - name: Upload Phase 2B.10D gated promotion diagnostic kit
+      - name: Upload Phase 2C.1J shadow-anatomy physical-smoke kit
         uses: actions/upload-artifact@v4
         with:
-          name: touchplus-phase2b10d-gated-promotion-windows
-          path: build/touchplus-phase2b10d-gated-promotion/**
+          name: touchplus-phase2c1j-shadow-anatomy-windows
+          path: build/touchplus-phase2c1j-shadow-anatomy/**
           if-no-files-found: error
           retention-days: 30

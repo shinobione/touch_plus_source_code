@@ -10,10 +10,12 @@
 // leaves the accepted A result and smoothing path unchanged.
 
 #include "depth_surface_frame_runtime.h"
+#include "contact_state_machine_v2c1.h"
 #include "fingertip_authoritative_selection_v10d.h"
 #include "fingertip_promotion_gate_v10c.h"
 #include "fingertip_refiner_v10.h"
 #include "fingertip_stereo_shadow_v10b.h"
+#include "phase2c1a_diagnostic.h"
 
 #ifdef point_depth
 #undef point_depth
@@ -25,10 +27,14 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <sstream>
 #include <vector>
 
 namespace touchplus::depth {
@@ -64,6 +70,14 @@ struct RuntimeStateV10 {
     touchplus::tracking::PromotionSmootherV10D promotion_smoother{};
     touchplus::tracking::PromotionSelectionStatsV10D selection_stats{};
     std::uint64_t selection_identity_id = 0;
+    touchplus::contact::ContactStateMachineV2C1 contact_machine{};
+    touchplus::contact::ContactOutputV2C1 contact{};
+    touchplus::diagnostic::DiagnosticCsvV2C1A diagnostic_csv{};
+    touchplus::diagnostic::PhysicalLabelV2C1A physical_label =
+        touchplus::diagnostic::PhysicalLabelV2C1A::None;
+    std::array<bool, 4> previous_label_keys{};
+    std::uint64_t diagnostic_frame = 0;
+    bool diagnostic_open_attempted = false;
     std::uint64_t attempts = 0;
     std::uint64_t accepts = 0;
     std::uint64_t shadow_attempts = 0;
@@ -125,6 +139,60 @@ inline void maybe_start_background(RuntimeStateV10& s) {
     const bool rising = down && !s.previous_b_down;
     s.previous_b_down = down;
     if (rising) start_background(s);
+}
+
+inline std::filesystem::path diagnostic_csv_path_v2c1a() {
+    std::array<wchar_t, 32768> module_path{};
+    const DWORD length = GetModuleFileNameW(
+        nullptr, module_path.data(), static_cast<DWORD>(module_path.size()));
+    std::filesystem::path directory =
+        length > 0 && length < static_cast<DWORD>(module_path.size())
+        ? std::filesystem::path(module_path.data()).parent_path()
+        : std::filesystem::current_path();
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t seconds = std::chrono::system_clock::to_time_t(now);
+    std::tm local{};
+    localtime_s(&local, &seconds);
+    std::wostringstream name;
+    name << L"touchplus-phase2c1a-" << std::put_time(&local, L"%Y%m%d-%H%M%S")
+         << L".csv";
+    return directory / name.str();
+}
+
+inline void ensure_diagnostic_open_v2c1a(RuntimeStateV10& s) {
+    if (s.diagnostic_csv.is_open() || s.diagnostic_open_attempted) return;
+    s.diagnostic_open_attempted = true;
+    const auto path = diagnostic_csv_path_v2c1a();
+    if (!s.diagnostic_csv.open(path)) {
+        std::cerr << "[2C.1A] CSV open failed: " << path.string()
+                  << " | diagnostic capture unavailable"
+                  << " | OS_INJECTION=DISABLED\n";
+        return;
+    }
+    std::cout << "[2C.1A] CSV=" << path.string()
+              << " | label=NONE | keys H=HIGH N=NEAR C=CONTACT 0=NONE"
+              << " | OS_INJECTION=DISABLED\n";
+}
+
+inline void maybe_update_physical_label_v2c1a(RuntimeStateV10& s) {
+    constexpr std::array<int, 4> keys{'H', 'N', 'C', '0'};
+    constexpr std::array<touchplus::diagnostic::PhysicalLabelV2C1A, 4> labels{
+        touchplus::diagnostic::PhysicalLabelV2C1A::High,
+        touchplus::diagnostic::PhysicalLabelV2C1A::Near,
+        touchplus::diagnostic::PhysicalLabelV2C1A::Contact,
+        touchplus::diagnostic::PhysicalLabelV2C1A::None};
+    for (std::size_t i = 0; i < keys.size(); ++i) {
+        const bool down = (GetAsyncKeyState(keys[i]) & 0x8000) != 0;
+        const bool rising = down && !s.previous_label_keys[i];
+        s.previous_label_keys[i] = down;
+        if (!rising || s.physical_label == labels[i]) continue;
+        s.physical_label = labels[i];
+        s.diagnostic_csv.flush();
+        std::cout << "[2C.1A] physical_label="
+                  << touchplus::diagnostic::physical_label_name_v2c1a(
+                      s.physical_label)
+                  << " | OS_INJECTION=DISABLED\n";
+    }
 }
 
 inline void accumulate_background(
@@ -327,6 +395,105 @@ inline void evaluate_and_record_gate_v10c(
     apply_authoritative_selection_v10d(hybrid, modern);
 }
 
+inline touchplus::contact::FingertipSourceV2C1 contact_source_v2c1(
+    const RuntimeStateV10& hybrid) {
+
+    if (hybrid.selection_has_result &&
+        hybrid.selection.source ==
+            touchplus::tracking::AuthoritativeSourceV10D::B) {
+        return touchplus::contact::FingertipSourceV2C1::B;
+    }
+    return touchplus::contact::FingertipSourceV2C1::A;
+}
+
+inline void print_contact_telemetry_v2c1(
+    const char* prefix,
+    const touchplus::contact::ContactOutputV2C1& contact) {
+
+    std::cout
+        << std::fixed << std::setprecision(1)
+        << prefix
+        << " contact_state="
+        << touchplus::contact::contact_state_name_v2c1(contact.state)
+        << " contact_event="
+        << touchplus::contact::contact_event_name_v2c1(contact.event)
+        << " contact_reason=" << contact.reason
+        << " identity_id=" << contact.identity_id
+        << " fingertip_source="
+        << touchplus::contact::fingertip_source_name_v2c1(
+            contact.fingertip_source)
+        << " X=" << contact.x_mm
+        << " Y=" << contact.y_mm
+        << " H=" << contact.h_mm;
+    if (contact.delta_valid) {
+        std::cout
+            << " dH=" << contact.dh_mm
+            << " dXY=" << contact.dxy_mm;
+    } else {
+        std::cout << " dH=nan dXY=nan";
+    }
+    std::cout
+        << " candidate_count=" << contact.candidate_count
+        << " release_count=" << contact.release_count
+        << " DOWN_total=" << contact.down_total
+        << " UP_total=" << contact.up_total
+        << " OS_INJECTION=DISABLED\n";
+}
+
+inline void update_contact_v2c1(
+    RuntimeStateV10& hybrid,
+    touchplus::depth::tracking_runtime_detail::RuntimeState& modern) {
+
+    const auto& fusion = modern.tracker.last_fusion();
+    touchplus::contact::ContactInputV2C1 input;
+    input.identity_accepted = modern.enabled && fusion.publish &&
+        fusion.identity_id != 0 &&
+        touchplus::tracking::promotion_confidence_rank_v10c(
+            modern.tracker.identity_confidence()) > 0;
+    input.identity_current = modern_identity_current_v10c(modern);
+    input.identity_stale = modern_identity_stale_v10c(modern);
+    input.sample_valid = modern.result.fingertip_valid;
+    input.identity_id = fusion.identity_id;
+    input.fingertip_source = contact_source_v2c1(hybrid);
+    input.x_mm = modern.result.smoothed_tip.x_mm;
+    input.y_mm = modern.result.smoothed_tip.y_mm;
+    input.h_mm = modern.result.smoothed_tip.h_mm;
+
+    hybrid.contact = hybrid.contact_machine.update(input);
+
+    ensure_diagnostic_open_v2c1a(hybrid);
+    touchplus::diagnostic::DiagnosticRowV2C1A row;
+    row.timestamp = std::chrono::system_clock::now();
+    row.frame = ++hybrid.diagnostic_frame;
+    row.physical_label = hybrid.physical_label;
+    row.identity_id = input.identity_id;
+    row.identity_accepted = input.identity_accepted;
+    row.identity_current = input.identity_current;
+    row.identity_stale = input.identity_stale;
+    row.fingertip_valid = input.sample_valid;
+    row.fingertip_source = touchplus::contact::fingertip_source_name_v2c1(
+        input.fingertip_source);
+    row.raw_h_mm = input.sample_valid
+        ? modern.result.raw_tip.h_mm
+        : std::numeric_limits<double>::quiet_NaN();
+    row.smoothed_h_mm = input.sample_valid
+        ? input.h_mm
+        : std::numeric_limits<double>::quiet_NaN();
+    row.contact_state = touchplus::contact::contact_state_name_v2c1(
+        hybrid.contact.state);
+    row.contact_event = touchplus::contact::contact_event_name_v2c1(
+        hybrid.contact.event);
+    row.rejection_reason = hybrid.contact.reason;
+    if (!hybrid.diagnostic_csv.write(row)) {
+        std::cerr << "[2C.1A] CSV write failed at frame=" << row.frame << '\n';
+    }
+    if (hybrid.contact.state_changed ||
+        hybrid.contact.event == touchplus::contact::ContactEventV2C1::TouchDown ||
+        hybrid.contact.event == touchplus::contact::ContactEventV2C1::TouchUp) {
+        print_contact_telemetry_v2c1("[CONTACT_TRANSITION]", hybrid.contact);
+    }
+}
+
 inline void overlay_refined_candidate(
     std::vector<std::uint8_t>& heatmap_bgra,
     const touchplus::tracking::DistalRefineResultV10& refined) {
@@ -455,6 +622,8 @@ inline void run_refiner(
 inline void maybe_report(RuntimeStateV10& hybrid) {
     ++hybrid.report_counter;
     if ((hybrid.report_counter % 30) != 0) return;
+
+    print_contact_telemetry_v2c1("[CONTACT] heartbeat |", hybrid.contact);
 
     if (hybrid.background_learning) {
         std::cout
@@ -605,8 +774,10 @@ inline void compute_depth_heatmap_hybrid_v10_wrapper(
 
     auto& modern = tracking_runtime_detail::state();
     auto& hybrid = hybrid_refiner_runtime_detail_v10::state();
+    hybrid_refiner_runtime_detail_v10::maybe_update_physical_label_v2c1a(hybrid);
     hybrid_refiner_runtime_detail_v10::run_refiner(
         hybrid, modern, c, left, right, workspace, workspace.heatmap_bgra);
+    hybrid_refiner_runtime_detail_v10::update_contact_v2c1(hybrid, modern);
 }
 
 inline PointDepth point_depth_surface_runtime_hybrid_v10_wrapper(
