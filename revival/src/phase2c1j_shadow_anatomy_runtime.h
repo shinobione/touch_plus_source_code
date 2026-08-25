@@ -1,16 +1,17 @@
 #pragma once
 
-// Phase 2C.1J diagnostic-only ungated anatomy probe.
+// Phase 2C.1J.1 diagnostic-only ungated anatomy probe.
 //
-// Runs the full accepted + 2C.1I stack first. It then derives a separate
-// APPEARANCE_ONLY_24 half-resolution mask from the already-learned hybrid
-// background and publishes LEFT + that mask through a distinct named-memory
-// channel. A second Python sidecar may ignore the accepted hand_valid gate on
-// this channel only. Its result is console/CSV telemetry and is never consumed
-// by accepted anatomy, fusion, stereo, contact or OS output.
+// Runs the full accepted + 2C.1I stack first. A separate APPEARANCE_ONLY_24
+// half-resolution mask and separate IPC channel are used only when the accepted
+// V8/V9 hand gate has actually failed and accepted anatomy is UNAVAILABLE.
+// Probes are throttled to ~5 Hz (1 frame in 6 at the accepted ~30 fps stream).
+// The shadow result remains console/CSV telemetry only and is never consumed by
+// accepted anatomy, fusion, stereo, contact or OS output.
 
 #include "phase2c1i_shadow_dataset_runtime.h"
 #include "fingertip_anatomy_shadow_ipc_v2c1j.h"
+#include "shadow_anatomy_probe_policy_v2c1j1.h"
 
 #ifdef compute_depth_heatmap
 #undef compute_depth_heatmap
@@ -71,13 +72,14 @@ inline void ensure_csv_open_v2c1j(RuntimeStateV2C1J& s) {
     const auto path = csv_path_v2c1j();
     s.csv.open(path, std::ios::out | std::ios::trunc);
     if (!s.csv) {
-        std::cerr << "[2C.1J] CSV open failed: " << path.string()
+        std::cerr << "[2C.1J.1] CSV open failed: " << path.string()
                   << " | shadow anatomy telemetry unavailable"
                   << " | authoritative=UNCHANGED OS_INJECTION=DISABLED\n";
         return;
     }
     s.csv
         << "timestamp_utc,frame,physical_label,shadow_mask_cells,mask_mode,"
+           "probe_attempted,probe_gate,probe_period_frames,"
            "accepted_hand_valid,accepted_anatomy_status,accepted_anatomy_age,"
            "accepted_fusion_publish,accepted_identity_confidence,"
            "shadow_publish_ok,shadow_status,shadow_age,shadow_source,shadow_pose,"
@@ -86,8 +88,11 @@ inline void ensure_csv_open_v2c1j(RuntimeStateV2C1J& s) {
            "shadow_extension_px,shadow_reason_code,label_used_for_decision,"
            "shadow_only,accepted_pipeline_consumes_shadow,authoritative,OS_INJECTION\n";
     s.csv.flush();
-    std::cout << "[2C.1J] CSV=" << path.string()
+    std::cout << "[2C.1J.1] CSV=" << path.string()
               << " | mask=APPEARANCE_ONLY_24"
+              << " | probe=HAND_LOSS_ONLY"
+              << " | period_frames="
+              << touchplus::tracking::shadow_probe_v2c1j1::kProbePeriodFrames
               << " | IPC=SEPARATE"
               << " | accepted_pipeline_consumes_shadow=NO"
               << " | authoritative=UNCHANGED"
@@ -149,6 +154,8 @@ inline void write_csv_v2c1j(
     RuntimeStateV2C1J& s,
     std::uint32_t frame,
     std::size_t mask_cells,
+    bool probe_attempted,
+    touchplus::tracking::shadow_probe_v2c1j1::ProbeGate probe_gate,
     bool accepted_hand_valid,
     const touchplus::tracking::AnatomyObservationV9& accepted_anatomy,
     bool fusion_publish,
@@ -162,6 +169,9 @@ inline void write_csv_v2c1j(
           << shadow_label_name_v2c1j() << ','
           << mask_cells << ','
           << "APPEARANCE_ONLY_24" << ','
+          << (probe_attempted ? 1 : 0) << ','
+          << touchplus::tracking::shadow_probe_v2c1j1::probe_gate_name(probe_gate) << ','
+          << touchplus::tracking::shadow_probe_v2c1j1::kProbePeriodFrames << ','
           << (accepted_hand_valid ? 1 : 0) << ','
           << touchplus::tracking::anatomy_status_name_v9(accepted_anatomy.status) << ','
           << accepted_anatomy.age_frames << ','
@@ -183,12 +193,14 @@ inline void write_csv_v2c1j(
           << shadow.reason_code << ','
           << "0,1,0,UNCHANGED,DISABLED\n";
     ++s.rows;
-    if ((s.rows % 30U) == 0U) s.csv.flush();
+    if ((s.rows % 15U) == 0U) s.csv.flush();
 }
 
 inline void report_v2c1j(
     std::uint32_t frame,
     std::size_t mask_cells,
+    bool probe_attempted,
+    touchplus::tracking::shadow_probe_v2c1j1::ProbeGate probe_gate,
     bool accepted_hand_valid,
     const touchplus::tracking::AnatomyObservationV9& accepted_anatomy,
     bool fusion_publish,
@@ -196,10 +208,15 @@ inline void report_v2c1j(
     const touchplus::tracking::ShadowAnatomyObservationV2C1J& shadow,
     bool transition) {
 
-    if (!transition && (frame % 15U) != 0U) return;
+    if (!probe_attempted && !transition && (frame % 30U) != 0U) return;
     std::cout << std::fixed << std::setprecision(2)
               << "[ANATOMY_SHADOW] frame=" << frame
               << " label=" << shadow_label_name_v2c1j()
+              << " probe=" << (probe_attempted ? "RUN" : "SKIP")
+              << " gate="
+              << touchplus::tracking::shadow_probe_v2c1j1::probe_gate_name(probe_gate)
+              << " period_frames="
+              << touchplus::tracking::shadow_probe_v2c1j1::kProbePeriodFrames
               << " mask_cells=" << mask_cells
               << " mask_mode=APPEARANCE_ONLY_24"
               << " accepted_hand=" << (accepted_hand_valid ? 1 : 0)
@@ -241,29 +258,51 @@ inline void evaluate_v2c1j(
     const auto& accepted_anatomy = modern.tracker.last_anatomy_observation();
     const auto& fusion = modern.tracker.last_fusion();
 
-    std::vector<std::uint8_t> mask(
-        static_cast<std::size_t>(kDepthWidth) * kDepthHeight, 0);
-    if (hybrid.background_ready) {
-        mask = make_shadow_mask_v2c1j(left_gray, hybrid.background_left);
-    }
-    const std::size_t mask_cells = count_mask_v2c1j(mask);
-
-    const bool publish_ok = s.bridge.publish_frame(
+    using touchplus::tracking::shadow_probe_v2c1j1::ProbeGate;
+    ProbeGate probe_gate = touchplus::tracking::shadow_probe_v2c1j1::precheck(
         frame,
-        left_gray,
-        mask,
+        hybrid.background_ready,
         accepted_result.hand_valid,
-        hybrid.background_ready);
-    const auto shadow = s.bridge.read_result(frame, 3);
+        accepted_anatomy.status == touchplus::tracking::AnatomyStatusV9::Unavailable);
 
-    const bool transition = shadow.status != s.previous_status;
+    std::vector<std::uint8_t> mask;
+    std::size_t mask_cells = 0;
+    if (probe_gate == ProbeGate::Due) {
+        mask = make_shadow_mask_v2c1j(left_gray, hybrid.background_left);
+        mask_cells = count_mask_v2c1j(mask);
+        probe_gate = touchplus::tracking::shadow_probe_v2c1j1::validate_mask(
+            probe_gate, mask_cells);
+    }
+
+    const bool probe_attempted = probe_gate == ProbeGate::Due;
+    bool publish_ok = false;
+    touchplus::tracking::ShadowAnatomyObservationV2C1J shadow{};
+    if (probe_attempted) {
+        publish_ok = s.bridge.publish_frame(
+            frame,
+            left_gray,
+            mask,
+            accepted_result.hand_valid,
+            hybrid.background_ready);
+        shadow = s.bridge.read_result(frame, 3);
+    }
+
+    const bool transition =
+        probe_attempted && shadow.status != s.previous_status;
     report_v2c1j(
-        frame, mask_cells, accepted_result.hand_valid, accepted_anatomy,
+        frame, mask_cells, probe_attempted, probe_gate,
+        accepted_result.hand_valid, accepted_anatomy,
         fusion.publish, publish_ok, shadow, transition);
-    write_csv_v2c1j(
-        s, frame, mask_cells, accepted_result.hand_valid, accepted_anatomy,
-        fusion.publish, modern.tracker.identity_confidence(), publish_ok, shadow);
-    s.previous_status = shadow.status;
+
+    // 2C.1I already records every frame. Keep 2C.1J.1 lightweight by writing
+    // only actual shadow probes plus a 1 Hz heartbeat for gate visibility.
+    if (probe_attempted || (frame % 30U) == 0U) {
+        write_csv_v2c1j(
+            s, frame, mask_cells, probe_attempted, probe_gate,
+            accepted_result.hand_valid, accepted_anatomy,
+            fusion.publish, modern.tracker.identity_confidence(), publish_ok, shadow);
+    }
+    if (probe_attempted) s.previous_status = shadow.status;
 }
 
 } // namespace shadow_anatomy_runtime_detail_v2c1j
