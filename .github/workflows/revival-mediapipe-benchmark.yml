@@ -1,0 +1,37 @@
+name: Revival MediaPipe Benchmark
+
+on:
+  push:
+    branches:
+      - revival/phase2b10m-mediapipe-benchmark
+    paths:
+      - "revival/tools/*mediapipe-benchmark*"
+      - "revival/notes/phase2b10m-mediapipe-benchmark.md"
+      - ".github/workflows/revival-mediapipe-benchmark.yml"
+  pull_request:
+    paths:
+      - "revival/tools/*mediapipe-benchmark*"
+      - "revival/notes/phase2b10m-mediapipe-benchmark.md"
+      - ".github/workflows/revival-mediapipe-benchmark.yml"
+
+jobs:
+  offline-probe:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python syntax + dependency-free self-test
+        shell: pwsh
+        run: |
+          python -m py_compile .\revival\tools\touchplus_mediapipe_benchmark.py
+          python .\revival\tools\touchplus_mediapipe_benchmark.py --self-test
+
+      - name: Install isolated MediaPipe benchmark and smoke the official model
+        shell: pwsh
+        run: |
+          .\revival\tools\setup-touchplus-mediapipe-benchmark.ps1 -Python "$env:pythonLocation\python.exe"
