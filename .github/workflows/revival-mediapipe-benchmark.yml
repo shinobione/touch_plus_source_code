@@ -1,0 +1,61 @@
+name: Revival MediaPipe Benchmark
+
+on:
+  push:
+    branches:
+      - revival/phase2b10m-mediapipe-benchmark
+    paths:
+      - "revival/tools/*mediapipe-benchmark*"
+      - "revival/tools/*mediapipe*fusion*benchmark*"
+      - "revival/tools/*mediapipe*refiner*benchmark*"
+      - "revival/notes/phase2b10m-mediapipe-benchmark.md"
+      - "revival/notes/phase2b10m1-mediapipe-advisory-fusion.md"
+      - "revival/notes/phase2b10m2-mediapipe-refiner.md"
+      - ".github/workflows/revival-mediapipe-benchmark.yml"
+  pull_request:
+    paths:
+      - "revival/tools/*mediapipe-benchmark*"
+      - "revival/tools/*mediapipe*fusion*benchmark*"
+      - "revival/tools/*mediapipe*refiner*benchmark*"
+      - "revival/notes/phase2b10m-mediapipe-benchmark.md"
+      - "revival/notes/phase2b10m1-mediapipe-advisory-fusion.md"
+      - "revival/notes/phase2b10m2-mediapipe-refiner.md"
+      - ".github/workflows/revival-mediapipe-benchmark.yml"
+
+jobs:
+  offline-probe:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python syntax + dependency-free self-tests
+        shell: pwsh
+        run: |
+          python -m py_compile .\revival\tools\touchplus_mediapipe_benchmark.py
+          python -m py_compile .\revival\tools\touchplus_mediapipe_fusion_benchmark.py
+          python -m py_compile .\revival\tools\touchplus_mediapipe_refiner_benchmark.py
+          python .\revival\tools\touchplus_mediapipe_benchmark.py --self-test
+          python .\revival\tools\touchplus_mediapipe_fusion_benchmark.py --self-test
+          python .\revival\tools\touchplus_mediapipe_refiner_benchmark.py --self-test
+
+      - name: Install isolated MediaPipe benchmark and smoke the official model
+        shell: pwsh
+        run: |
+          .\revival\tools\setup-touchplus-mediapipe-benchmark.ps1 -Python "$env:pythonLocation\python.exe"
+
+      - name: Smoke PowerShell wrapper with a spaced input path
+        shell: pwsh
+        run: |
+          $SmokeInput = Join-Path $env:RUNNER_TEMP "Touch Plus MediaPipe Smoke"
+          $SmokeOutput = Join-Path $env:RUNNER_TEMP "Touch Plus MediaPipe Output"
+          New-Item -ItemType Directory -Force $SmokeInput | Out-Null
+          $VenvPython = Join-Path $env:LOCALAPPDATA "TouchPlus\MediaPipeBenchmark\venv\Scripts\python.exe"
+          & $VenvPython -c "import cv2,numpy as np,pathlib; p=pathlib.Path(r'$SmokeInput'); cv2.imwrite(str(p/'pair-001-left.png'), np.zeros((256,256,3), dtype=np.uint8))"
+          if ($LASTEXITCODE -ne 0) { throw "failed to create wrapper smoke image" }
+          .\revival\tools\run-touchplus-mediapipe-benchmark.ps1 -Input $SmokeInput -Output $SmokeOutput -NoSetup
+          if (-not (Test-Path (Join-Path $SmokeOutput "summary.json"))) { throw "wrapper smoke did not produce summary.json" }
