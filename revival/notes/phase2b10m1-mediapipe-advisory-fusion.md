@@ -1,6 +1,6 @@
 # Phase 2B.10M.1 — conservative MediaPipe advisory fusion
 
-Status: **OFFLINE / SHADOW-ONLY / FAIL-CLOSED / DO NOT MERGE**
+Status: **ARCHIVED-PHYSICAL-DATASET OFFLINE SAFETY PASS / SHADOW-ONLY / FAIL-CLOSED / DO NOT MERGE**
 
 ## Why this follow-up exists
 
@@ -20,7 +20,7 @@ A narrower use can still be valuable:
 
 > Can MediaPipe contribute a distal anatomical axis only when it independently agrees with an already-conservative Touch+ identity path?
 
-For this offline benchmark the baseline is the existing **2B.9B.1 `GUIDED_DISTAL`** path: OpenCV-Zoo anatomy + Touch+ learned-background silhouette + fail-closed distal projection/ROI reacquisition. That path was previously physically reviewed at 8/10 published, 0 observed wrong published tips, 2 safe rejects.
+For this offline benchmark the baseline is the existing **2B.9B.1 `GUIDED_DISTAL`** path: OpenCV-Zoo anatomy + Touch+ learned-background silhouette + fail-closed distal projection/ROI reacquisition. That path was previously physically reviewed at 8/10 published, 0 observed wrong published tips, 2 safe rejects on its binding dataset.
 
 This is a benchmark baseline, **not a runtime promotion** and not a replacement for the current authoritative Phase 2B output.
 
@@ -92,12 +92,73 @@ Desired safety shape:
 ```text
 correct/same-axis MediaPipe : ADVISORY_AXIS_ACCEPT where baseline is valid
 wrong-finger MediaPipe      : REJECT_MEDIAPIPE_IDENTITY_DISAGREEMENT
-MediaPipe unavailable       : KEEP_BASELINE_MEDIAPIPE_UNAVAILABLE
+MediaPipe unavailable       : KEEP_BASELINE_MEDIAPIPE_UNAVAILABLE when baseline is valid
 baseline reject             : BASELINE_REJECT_NO_MEDIAPIPE_RESCUE
 wrong finite MP publication : impossible by policy
 ```
 
 No new camera capture is required.
+
+## Archived physical dataset replay — 2026-09-04
+
+Dataset: original 10-frame LEFT pointing set previously used to stress fingertip identity. This is an **offline replay of real physical Touch+ captures**, not a live-hardware/runtime validation.
+
+Observed decisions:
+
+```text
+ADVISORY_AXIS_ACCEPT                    : 6 / 10
+REJECT_MEDIAPIPE_IDENTITY_DISAGREEMENT : 1 / 10
+BASELINE_REJECT_NO_MEDIAPIPE_RESCUE    : 3 / 10
+KEEP_BASELINE_MEDIAPIPE_UNAVAILABLE    : 0 / 10
+```
+
+Frame-level result:
+
+```text
+pair-001 : BASELINE_REJECT_NO_MEDIAPIPE_RESCUE
+pair-002 : ADVISORY_AXIS_ACCEPT
+pair-003 : ADVISORY_AXIS_ACCEPT
+pair-004 : ADVISORY_AXIS_ACCEPT
+pair-005 : REJECT_MEDIAPIPE_IDENTITY_DISAGREEMENT
+pair-006 : BASELINE_REJECT_NO_MEDIAPIPE_RESCUE
+pair-007 : ADVISORY_AXIS_ACCEPT
+pair-008 : ADVISORY_AXIS_ACCEPT
+pair-009 : ADVISORY_AXIS_ACCEPT
+pair-010 : BASELINE_REJECT_NO_MEDIAPIPE_RESCUE
+```
+
+### Safety-critical stress cases
+
+`pair-005` was one of the visually confirmed standalone MediaPipe wrong-finger cases. M.1 rejected it with multiple independent disagreements:
+
+```text
+AXIS_DISAGREEMENT
+CHAIN_SPATIAL_DISAGREEMENT
+MODEL_TIP_TOO_FAR_FROM_BASELINE_INDEX
+TIP_OUTSIDE_BASELINE_DISTAL_CORRIDOR
+INDEX_CHAIN_ORDER_DISAGREES
+```
+
+The measured MediaPipe-vs-baseline axis disagreement was about `114.5°`, so this is not a marginal threshold outcome.
+
+`pair-010` was the other visually confirmed standalone wrong-finger case. The conservative 2B.9B.1 baseline itself rejected the frame, therefore M.1 produced `BASELINE_REJECT_NO_MEDIAPIPE_RESCUE`; MediaPipe was structurally forbidden from rescuing it.
+
+`pair-006` had neither an authoritative baseline (`GUIDED_UNAVAILABLE`) nor a MediaPipe hand (`NO_HAND`), so it also failed closed as `BASELINE_REJECT_NO_MEDIAPIPE_RESCUE`.
+
+Visual review of the six `ADVISORY_AXIS_ACCEPT` overlays (`002/003/004/007/008/009`) showed the MediaPipe advisory chain aligned with the same physical index corridor as the conservative baseline. Accepted advisory axis-angle disagreement was approximately `3.5°–8.9°` on this replay.
+
+### M.1 verdict
+
+**PRIMARY OFFLINE SAFETY GATE: PASS.**
+
+The archived replay produced:
+
+- `0` accepted advisory axes on the two known standalone wrong-finger stress cases;
+- `0` MediaPipe rescues of a rejected/uncertain baseline;
+- `0` MediaPipe-owned fingertips by construction;
+- six same-corridor advisory axes that may justify a later shadow-only refiner experiment.
+
+This is a **safety/architecture pass, not a runtime promotion and not a live hardware pass**. Recall remains intentionally secondary: three of ten frames had no authoritative baseline and therefore stayed rejected/unavailable.
 
 ## Safety boundary
 
