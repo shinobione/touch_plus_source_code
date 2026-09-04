@@ -1,5 +1,7 @@
 param(
-    [Parameter(Mandatory=$true)][string]$Input,
+    [Parameter(Mandatory=$true)]
+    [Alias("Input")]
+    [string]$InputPath,
     [string]$Output = "",
     [ValidateSet("left", "all")][string]$Eye = "left",
     [int]$NumHands = 2,
@@ -26,7 +28,7 @@ if ((-not (Test-Path $Python)) -or (-not (Test-Path $Model))) {
 }
 
 & $Python $Probe `
-    --input $Input `
+    --input $InputPath `
     --output $Output `
     --model $Model `
     --eye $Eye `
