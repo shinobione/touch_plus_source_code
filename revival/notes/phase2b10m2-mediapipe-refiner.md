@@ -1,6 +1,6 @@
 # Phase 2B.10M.2 — MediaPipe advisory axis + Ractiv-style distal refiner
 
-Status: **OFFLINE / SHADOW-ONLY / REPLAY PENDING / DO NOT MERGE**
+Status: **ARCHIVED-DATASET OFFLINE COMPLETE / NO MATERIAL MEDIAPIPE AXIS ADVANTAGE / SHADOW-ONLY / DO NOT MERGE**
 
 ## Question
 
@@ -76,44 +76,85 @@ The baseline `GUIDED_DISTAL` point stays unchanged. Neither refined point is aut
 - distance to `GUIDED_DISTAL` is comparative evidence only and must not be called physical ground truth;
 - no stereo, Q, surface `H`, Phase 2C or OS injection is run or modified.
 
-Diagnostic outcomes include:
+## Archived physical dataset replay — 2026-09-04
+
+Dataset: original 10-frame LEFT pointing set used by M and M.1.
+
+Observed outcomes:
 
 ```text
-MP_AXIS_CLOSER_TO_BASELINE_REFERENCE
-LEGACY_AXIS_CLOSER_TO_BASELINE_REFERENCE
-AXIS_PARITY_TO_BASELINE_REFERENCE
-MP_AXIS_REFINER_REJECT
-MP_AXIS_SHADOW_REGRESSION
-MP_ONLY_SHADOW_ACCEPT
-NOT_RUN_M1_GATE
+NOT_RUN_M1_GATE                 : 4 / 10
+MP_ONLY_SHADOW_ACCEPT           : 1 / 10
+AXIS_PARITY_TO_BASELINE_REFERENCE: 3 / 10
+MP_AXIS_REFINER_REJECT          : 2 / 10
 ```
+
+Frame-level result:
+
+```text
+pair-001 : NOT_RUN_M1_GATE
+pair-002 : MP_ONLY_SHADOW_ACCEPT
+pair-003 : AXIS_PARITY_TO_BASELINE_REFERENCE
+pair-004 : AXIS_PARITY_TO_BASELINE_REFERENCE
+pair-005 : NOT_RUN_M1_GATE
+pair-006 : NOT_RUN_M1_GATE
+pair-007 : AXIS_PARITY_TO_BASELINE_REFERENCE
+pair-008 : MP_AXIS_REFINER_REJECT
+pair-009 : MP_AXIS_REFINER_REJECT
+pair-010 : NOT_RUN_M1_GATE
+```
+
+### Safety-critical result
+
+The two known standalone MediaPipe wrong-finger cases remained outside M.2:
+
+- `pair-005` -> `NOT_RUN_M1_GATE`;
+- `pair-010` -> `NOT_RUN_M1_GATE`.
+
+No visually wrong finite MediaPipe-axis shadow candidate was observed in the M.2-eligible frames.
+
+### Comparative result on eligible frames
+
+`pair-003` produced the exact same refined pixel for both axes: `(581,131)`, about `2.24 px` from the conservative comparison reference.
+
+`pair-004` produced two nearby refined pixels with identical `10.0 px` reference distance.
+
+`pair-007` gave the MediaPipe-axis path only a sub-pixel-scale comparative edge: about `1.41 px` versus `2.24 px` from the comparison reference (`~0.82 px` gain). This is too small to establish a material advantage.
+
+`pair-008` and `pair-009` rejected both local refiners as `NO_FOREGROUND`, so MediaPipe did not recover availability there.
+
+`pair-002` is the only apparent MediaPipe-only acceptance. However, the legacy-axis path missed the V10 `31 px` maximum-shift threshold by only about `0.064 px` (`31.064 px`), while the MediaPipe-axis path landed exactly at `31.0 px`. The MediaPipe candidate still remained about `19 px` from the conservative comparison reference. This is therefore a threshold-edge artifact / weak signal, **not convincing evidence of a superior anatomical axis**.
+
+## M.2 verdict
+
+**SAFETY: PASS. MATERIAL VALUE: NOT DEMONSTRATED.**
+
+The accepted M.1 gate successfully kept known wrong-finger MediaPipe cases away from the refiner, but the surviving MediaPipe axis did not demonstrate a meaningful improvement over the baseline anatomy axis on this archived set:
+
+- 3 parity cases;
+- 2 shared refiner failures;
+- 1 nominal MediaPipe-only acceptance explained by a ~0.064 px threshold edge and still materially short of the comparison reference;
+- no convincing multi-pixel accuracy win attributable to MediaPipe.
+
+Therefore this dataset does **not** justify adding MediaPipe to the live Touch+ runtime merely as an extra refiner-axis dependency. The existing modern identity + Ractiv-style refiner path remains simpler and already has stronger live physical evidence.
+
+MediaPipe may remain a diagnostic research option, but there is currently no evidence-backed reason to spend runtime complexity, frame-synchronization surface or maintenance cost on it.
 
 ## Tooling
 
 - `revival/tools/touchplus_mediapipe_refiner_benchmark.py`
 - `revival/tools/run-touchplus-mediapipe-refiner-benchmark.ps1`
 
-Outputs stay under `%LOCALAPPDATA%\TouchPlus\MediaPipeBenchmark` by default:
+Outputs stay under `%LOCALAPPDATA%\TouchPlus\MediaPipeBenchmark` by default.
 
-```text
-output-refiner-m2\
-├── annotations\
-├── legacy-2b9b1\
-├── per-image\
-├── summary.csv
-└── summary.json
-```
+Raw user captures and generated overlays remain local and are not committed.
 
-Raw user captures and generated overlays must remain local and are not committed.
+## Project consequence
 
-## Primary replay
+M/M.1/M.2 answer the MediaPipe question sufficiently for now:
 
-Use the same original 10-frame pointing set used by M and M.1. No new camera capture is required.
+1. standalone identity oracle — **FAIL**;
+2. conservative advisory gate — **SAFETY PASS**;
+3. advisory-axis refiner value — **NO MATERIAL ADVANTAGE DEMONSTRATED**.
 
-A promising result requires, at minimum:
-
-1. the known wrong-finger M cases remain `NOT_RUN_M1_GATE`;
-2. no visually wrong finite MediaPipe-axis shadow candidate;
-3. accepted MediaPipe-axis candidates are mostly parity/better relative to the conservative distal reference rather than regressions.
-
-Even a promising M.2 result would remain **offline evidence only**. Any live use must be a separate shadow-only runtime slice with its own frame-sync and physical gate.
+Do not promote MediaPipe into the live runtime from these results. Any future revisit requires materially new evidence or a different role, not threshold tuning on this same dataset.
