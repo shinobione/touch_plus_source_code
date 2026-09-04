@@ -1,6 +1,6 @@
 # Phase 2B.10M — Google MediaPipe Hand Landmarker benchmark
 
-Status: **DIAGNOSTIC-ONLY / OFFLINE / NOT A RUNTIME PROMOTION**
+Status: **DIAGNOSTIC-ONLY / OFFLINE / STANDALONE ORACLE FAILED / M.1 ADVISORY FOLLOW-UP PASSED ITS ARCHIVED-DATASET SAFETY GATE**
 
 ## Purpose
 
@@ -61,18 +61,69 @@ For each pose, inspect the generated overlay and classify the MediaPipe index re
 
 The tool's own `LIKELY_EXTENDED` flag is **diagnostic only** and must never replace visual review.
 
+## Archived dataset results
+
+### Guided set
+
+```text
+no-hand control            : correct NO_HAND
+real-hand detection        : 10 / 10
+TIP_GOOD                   : 8 / 10
+TIP_PROXIMAL_BUT_AXIS_GOOD : 2 / 10
+WRONG_FINGER               : 0 / 10
+```
+
+### Original pointing set
+
+```text
+TIP_GOOD                   : 2 / 10
+TIP_PROXIMAL_BUT_AXIS_GOOD : 5 / 10
+WRONG_FINGER               : 2 / 10
+UNAVAILABLE                : 1 / 10
+```
+
+The original pointing set therefore failed the standalone identity-oracle gate. In particular, confident MediaPipe hand output could still attach landmarks 5→6→7→8 to the wrong physical finger. Model confidence and handedness must not be treated as fingertip identity authority.
+
+## Standalone verdict
+
+**MediaPipe standalone index/fingertip oracle: FAIL.**
+
+It is useful as anatomical evidence but unsafe as the source that chooses the finger or publishes the final 2D fingertip.
+
+Binding rule remains:
+
+> **wrong finite fingertip = blocker; UNKNOWN/reject is safe.**
+
+## Follow-up: Phase 2B.10M.1 advisory fusion
+
+A narrower fail-closed role was implemented in `phase2b10m1-mediapipe-advisory-fusion.md`:
+
+- the conservative 2B.9B.1 `GUIDED_DISTAL` path remains the offline identity baseline;
+- MediaPipe cannot rescue a rejected baseline;
+- MediaPipe cannot own the output pixel;
+- only a MediaPipe 5/6/7/8 chain that independently agrees with the baseline may expose an **axis advisory**;
+- disagreement produces an advisory reject while leaving the baseline untouched.
+
+The 2026-09-04 archived physical-dataset replay passed its **primary offline safety gate**:
+
+```text
+ADVISORY_AXIS_ACCEPT                    : 6 / 10
+REJECT_MEDIAPIPE_IDENTITY_DISAGREEMENT : 1 / 10
+BASELINE_REJECT_NO_MEDIAPIPE_RESCUE    : 3 / 10
+```
+
+Both known standalone wrong-finger stress cases were neutralized:
+
+- `pair-005`: explicit MediaPipe identity disagreement reject;
+- `pair-010`: baseline rejected, MediaPipe forbidden from rescue.
+
+No accepted advisory axis came from either known wrong-finger case. This is a safety/architecture pass only, **not** a runtime promotion and **not** a live hardware pass.
+
 ## Gate for any future live integration
 
-No runtime integration is authorized by this benchmark alone.
+No runtime integration is authorized by M or M.1 alone.
 
-A future proposal may be considered only if the real dataset shows:
-
-- no convincing confident `WRONG_FINGER` cases in the intended pointing poses;
-- useful availability across varied pointing orientations;
-- either accurate `TIP_GOOD` output or repeatable `TIP_PROXIMAL_BUT_AXIS_GOOD` output that the already-validated local distal refiner can improve;
-- fail-closed behavior when MediaPipe is unavailable or contradictory.
-
-Even if this gate is promising, any live integration must start as **shadow/diagnostic** and must pass a separate hardware smoke before it can influence authoritative fingertip selection.
+Any future proposal must remain shadow-only at first and preserve all existing frame-synchronization, stale-result, identity, stereo and metric-depth safety gates. MediaPipe may only be considered as an additional advisory feature when independent Touch+ identity already exists.
 
 ## Run
 
