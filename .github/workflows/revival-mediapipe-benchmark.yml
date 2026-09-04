@@ -35,3 +35,15 @@ jobs:
         shell: pwsh
         run: |
           .\revival\tools\setup-touchplus-mediapipe-benchmark.ps1 -Python "$env:pythonLocation\python.exe"
+
+      - name: Smoke PowerShell wrapper with a spaced input path
+        shell: pwsh
+        run: |
+          $SmokeInput = Join-Path $env:RUNNER_TEMP "Touch Plus MediaPipe Smoke"
+          $SmokeOutput = Join-Path $env:RUNNER_TEMP "Touch Plus MediaPipe Output"
+          New-Item -ItemType Directory -Force $SmokeInput | Out-Null
+          $VenvPython = Join-Path $env:LOCALAPPDATA "TouchPlus\MediaPipeBenchmark\venv\Scripts\python.exe"
+          & $VenvPython -c "import cv2,numpy as np,pathlib; p=pathlib.Path(r'$SmokeInput'); cv2.imwrite(str(p/'pair-001-left.png'), np.zeros((256,256,3), dtype=np.uint8))"
+          if ($LASTEXITCODE -ne 0) { throw "failed to create wrapper smoke image" }
+          .\revival\tools\run-touchplus-mediapipe-benchmark.ps1 -Input $SmokeInput -Output $SmokeOutput -NoSetup
+          if (-not (Test-Path (Join-Path $SmokeOutput "summary.json"))) { throw "wrapper smoke did not produce summary.json" }
