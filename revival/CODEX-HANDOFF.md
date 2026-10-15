@@ -1,12 +1,6 @@
 # TouchPlus Revival — Codex handoff
 
-This is the short operational entry point for the current coding slice. `revival/REVIVAL-ROADMAP.md` remains the accepted-stack reference; the active PR + this handoff carry the experimental delta.
-
-## Working model
-
-- **Codex** handles focused repo implementation, CMake/MSVC, tests, CI and packaging.
-- **Physical bench loop** owns real Touch+ execution and PHYSICAL PASS/FAIL.
-- CI is never a substitute for a real-device gate.
+This is the short operational entry point for the current coding slice. Do not re-audit the whole repository unless a contradiction appears.
 
 ## Canonical base
 
@@ -14,142 +8,113 @@ Repository: `shinobione/touch_plus_source_code`
 
 Integration branch: `revival/main`
 
-Accepted merge containing 2B.10A/10B/10C:
+Accepted Phase 2B.10D merge:
 
-`74e28c329256185eee543ae9d8b865f7788f0b54`
+`bd9f7eb905210595837482dbd0d45410f4d92cb2`
+
+Phase 2B.10D is physically accepted. Explicit gated B promotion passed on the real Touch+, but promotion remains opt-in. OS injection remains disabled.
 
 Read `AGENTS.md` before changing code.
 
-## Active experiment
+## Active slice
 
 Branch:
 
-`revival/phase2b10d-gated-promotion`
+`revival/phase2c1-contact-semantics`
 
 Phase:
 
-**2B.10D — gated authoritative promotion, explicit opt-in only**
+**2C.1 — conservative touch/contact semantics, semantic events only**
 
 Design note:
 
-`revival/notes/phase2b10d-gated-authoritative-promotion.md`
+`revival/notes/phase2c1-contact-semantics.md`
 
-PR #14 is merged. Its physical results are accepted evidence:
+Physical diagnostic note:
 
-- 2B.10A local distal refiner: PHYSICAL PASS;
-- 2B.10B shadow stereo A/B: PHYSICAL PASS / PROMISING;
-- 2B.10C counterfactual promotion gate: PHYSICAL PASS.
+`revival/notes/phase2c1a-h-characterization.md`
 
-2B.10C real-device gate summary:
+## Current physical status
 
-```text
-gate evaluations = 659
-KEEP_A           = 644
-WOULD_SELECT_B   = 15
-```
+Phase 2C.1 first smoke was a safe false-negative: `DOWN_total=0`, `UP_total=0`, no false touch, but no intended touch either.
 
-No anatomically wrong finite `WOULD_SELECT_B` was observed in that smoke. `WOULD_SELECT_B` remained non-authoritative in 2B.10C.
+Phase 2C.1A H-characterization run #1 then showed sparse valid high-hover samples around 60 mm and a readable near-hover sample around 43.7 mm, but the physical-contact pose was dominated by `NO_FINGER` / `INVALID_SAMPLE` with identity/fingertip state UNKNOWN/stale/non-current. No stable CONTACT H distribution was obtained.
 
-## 2B.10D objective
+**Do not retune 6/4/8 mm yet. The next blocker to characterize is identity/sample continuity at or extremely near physical contact.**
 
-Implement the first **authoritative** B selection, but only behind an explicit runtime opt-in.
+The next implementation, if requested, should be diagnostic-only: self-labelled per-frame CSV capture for HIGH / NEAR / CONTACT including validity/rejection state, raw H and smoothed H. It must not alter accepted tracking/contact behavior.
 
-Default launch must remain accepted-A behavior:
+## Objective
+
+The existing Phase 2C.1 state machine produces only:
 
 ```text
-HYBRID_PROMOTION=DISABLED -> A authoritative only
+HOVER
+TOUCH_DOWN
+TOUCH_HELD
+TOUCH_UP
 ```
 
-Experimental bench mode:
+No Windows mouse/touch injection, PointerMapper, UDP, click synthesis or other OS output is allowed.
+
+## Hard ownership boundaries
+
+- consume the accepted selected fingertip; do not choose/recompute A vs B;
+- current accepted identity remains authoritative;
+- UNKNOWN/stale/non-current identity can never create/continue contact;
+- invalid/non-finite metric sample can never create/continue contact;
+- camera calibration and `K/D/R/T/P/Q` unchanged;
+- accepted per-setup surface frame unchanged;
+- capture, matcher, sidecar, fingertip identity/fusion, refiner, 2B.10C gate and 2B.10D promotion rules unchanged;
+- OS injection remains disabled.
+
+## Current contact constants
+
+Do not change these without new physical evidence:
 
 ```text
-HYBRID_PROMOTION=ENABLED
-+ existing 2B.10C gate == WOULD_SELECT_B
--> selected same-frame source = B
-else
--> selected same-frame source = A
+candidate_h_mm    = 6.0
+contact_down_h_mm = 4.0
+contact_up_h_mm   = 8.0
+candidate_frames  = 3
+release_frames    = 2
+approach_delta_mm = -0.5
+max_frame_dh_mm   = 20.0
+max_frame_dxy_mm  = 50.0
 ```
 
-Reuse the existing `evaluate_promotion_gate_v10c(...)` rule. Do not loosen thresholds in this slice.
+## Next diagnostic working set
 
-When B is selected, keep the source coherent for that frame:
+If implementing the next diagnostic, start only from:
 
-- selected pixel = B refined pixel;
-- selected raw `Xsurface / Ysurface / H` = B raw metric result;
-- modern identity id/confidence remains authoritative;
-- downstream smoothing may consume the selected metric sample only in explicit promotion-enabled mode.
+- `revival/notes/phase2c1a-h-characterization.md`;
+- `revival/src/depth_surface_frame_runtime_v10.h` around current contact/raw-H telemetry;
+- `revival/tools/start-touchplus-phase2b9c.ps1` only if diagnostic hotkeys/launch options require it;
+- `.github/workflows/revival-fingertip.yml` only for packaging/test wiring.
 
-Do not mix A pixel with B XYZ/H or vice versa.
+Do not read all historical Phase 2B notes.
 
-## Hard exclusions
+## Next diagnostic requirements
 
-- `B_only` is never authoritative;
-- UNKNOWN/stale/non-current identity is never promotable;
-- rejected/inward refiner output is never promotable;
-- K/D/R/T/P/Q unchanged;
-- camera calibration unchanged;
-- accepted surface frame unchanged;
-- Phase 2C remains paused and untouched;
-- PointerMapper / UDP / mouse / touch / OS injection remain disabled;
-- do not let B create/reacquire finger identity.
+Diagnostic only, no behavior changes:
 
-## Required telemetry
+- operator labels `HIGH`, `NEAR`, `CONTACT` (hotkeys or another explicit runtime label mechanism);
+- per-frame CSV containing timestamp/frame, label, identity accepted/current/stale, fingertip valid, source A/B, raw H, smoothed H, rejection reason;
+- record invalid/UNKNOWN rows too;
+- preserve all current contact thresholds and state transitions;
+- preserve A/B selection, surface frame and calibration;
+- `OS_INJECTION=DISABLED`.
 
-Expose clearly:
+## Regression / packaging contract
 
-```text
-promotion_mode=DISABLED|ENABLED
-promotion_gate=KEEP_A|WOULD_SELECT_B
-selected_source=A|B
-selected_reason=...
-A confidence/support
-B confidence/support
-shift_px
-dXYZ
-dH
-selected_A cumulative
-selected_B cumulative
-source_switches cumulative
-```
+Before another physical handoff:
 
-## Required synthetic coverage
-
-At minimum:
-
-1. promotion disabled + WOULD_SELECT_B -> A;
-2. promotion enabled + WOULD_SELECT_B -> B;
-3. promotion enabled + KEEP_A -> A;
-4. B_only -> A;
-5. UNKNOWN/stale/non-current -> A;
-6. non-finite/excessive A/B delta -> A;
-7. inward/rejected refiner -> A;
-8. selected pixel and selected metric source always match;
-9. existing V8/V9/2B.10A/2B.10C tests remain green x64 + Win32;
-10. Phase 2A and Phase 1C/Q regressions remain green;
-11. OS injection remains disabled.
-
-## Scope discipline
-
-Do not re-audit the entire repository unless a contradiction appears.
-
-Primary working set should be limited to the existing 2B.10C gate, its runtime integration, focused tests, CMake/workflow packaging and this slice's documentation.
-
-Do not modify unrelated accepted layers.
-
-## End-of-slice contract
-
-Before handing back to the bench:
-
-- commit + push to `revival/phase2b10d-gated-promotion`;
-- report exact SHA;
-- report files changed;
-- report local tests/builds;
-- verify exact-head GitHub CI;
-- package a Win32 artifact with promotion disabled by default;
-- document the exact opt-in launch command for the promotion-enabled physical smoke;
+- keep existing V8/V9/2B.10A/2B.10C/2B.10D/2C.1 tests green x64 + Win32;
+- keep Phase 2A + Phase 1C/Q regressions green;
+- build the real Revival Win32 runtime;
+- package an exact-head Win32 physical-smoke artifact;
+- include the reusable bench-cache-aware launcher;
+- report SHA, files changed, tests, artifact and exact launch command;
+- commit + push only to `revival/phase2c1-contact-semantics`;
 - do not merge;
 - do not claim physical acceptance.
-
-Physical blocker remains:
-
-**any anatomically wrong finite promoted B fingertip = BLOCKER.**

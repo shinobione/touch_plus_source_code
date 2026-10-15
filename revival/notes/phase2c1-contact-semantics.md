@@ -1,0 +1,244 @@
+# Phase 2C.1 — conservative touch/contact semantics
+
+Date: 2026-08-23
+
+## Status
+
+Implemented on `revival/phase2c1-contact-semantics`; synthetic/CI gates pass.
+The first real-device semantic-contact smoke was executed against exact-head
+implementation `9490116b8c727a4c7bfca3c9f3adcf3b2d01ed79` and **did not pass the
+physical acceptance gate**. The failure is conservative/false-negative: no
+spurious `TOUCH_DOWN` was observed, but no intended physical contact produced a
+`TOUCH_DOWN` either.
+
+Accepted base: `revival/main` after PR #16 / Phase 2B.10D physical PASS and merge at:
+
+`bd9f7eb905210595837482dbd0d45410f4d92cb2`
+
+Phase 2C.1 must produce semantic contact events only. No mouse, Windows touch, UDP, PointerMapper, click injection, or other OS output is allowed in this slice.
+
+## Objective
+
+Consume the accepted current fingertip stream (`Xsurface / Ysurface / H`) and add a conservative temporal contact state machine that can emit only:
+
+- `HOVER`
+- `TOUCH_DOWN`
+- `TOUCH_HELD`
+- `TOUCH_UP`
+
+The contact layer must not change fingertip identity, stereo, calibration, surface-frame geometry, A/B promotion rules, or Phase 2B tracking.
+
+## Input ownership
+
+The state machine consumes the already-selected authoritative fingertip sample from the accepted runtime. It does not choose A vs B itself.
+
+Required input per frame:
+
+- current accepted identity is published/current and non-stale;
+- fingertip metric sample is valid and finite;
+- selected `Xsurface / Ysurface / H` from the accepted runtime;
+- current identity id so an identity change can reset/fail safe;
+- source label A/B for telemetry only.
+
+If identity is UNKNOWN/stale/non-current, stereo/sample is invalid, or metric values are non-finite, the frame is never eligible to create or continue contact.
+
+## State model
+
+Use an explicit deterministic state machine, e.g.:
+
+`NO_FINGER -> HOVER -> APPROACHING -> CONTACT_CANDIDATE -> TOUCH_DOWN -> TOUCH_HELD -> RELEASE -> HOVER`
+
+Externally visible semantic events remain only `HOVER`, `TOUCH_DOWN`, `TOUCH_HELD`, `TOUCH_UP`.
+
+Safety rules:
+
+1. one near-surface frame can never create `TOUCH_DOWN`;
+2. touchdown requires temporal persistence plus approach/downward context;
+3. release threshold is strictly above touchdown threshold (hysteresis);
+4. identity change/loss while touching must fail safe by ending the held contact, never leaving a stuck touch;
+5. large impossible H/XY jumps reset candidate/approach state;
+6. no-hand/invalid frames can never create a down event;
+7. a held stationary fingertip must not emit repeated `TOUCH_DOWN` events;
+8. lateral XY motion while low-H remains one held contact;
+9. repeated physical taps must produce exactly one DOWN/UP pair per tap.
+
+## Initial conservative constants
+
+These are first-smoke tuning values, not new calibration facts:
+
+```text
+candidate_h_mm      = 6.0
+contact_down_h_mm   = 4.0
+contact_up_h_mm     = 8.0
+candidate_frames    = 3
+release_frames      = 2
+approach_delta_mm   = -0.5 over recent valid samples
+max_frame_dh_mm     = 20.0
+max_frame_dxy_mm    = 50.0
+```
+
+At the accepted ~30 fps cadence, three candidate frames are roughly 100 ms. False negatives are preferable to false touches in this first slice.
+
+Do not silently tune these values from synthetic tests. Any threshold changes after implementation must be justified by the physical smoke.
+
+## Fail-safe behavior
+
+- Invalid/unknown before touch: reset to `NO_FINGER`, no touch event.
+- Invalid/unknown while `TOUCH_DOWN`/`TOUCH_HELD`: emit one fail-safe `TOUCH_UP` semantic event with explicit reason, then reset.
+- Identity id change while held: same fail-safe release behavior.
+- Non-finite sample: same fail-safe behavior.
+- Excessive jump: cancel approach/candidate; if already held, emit one fail-safe `TOUCH_UP` and reset.
+
+## Telemetry
+
+Report at a human-reviewable cadence and on every semantic transition:
+
+```text
+contact_state=...
+contact_event=NONE|HOVER|TOUCH_DOWN|TOUCH_HELD|TOUCH_UP
+contact_reason=...
+identity_id=...
+fingertip_source=A|B
+X=...
+Y=...
+H=...
+dH=...
+dXY=...
+candidate_count=...
+release_count=...
+DOWN_total=...
+UP_total=...
+OS_INJECTION=DISABLED
+```
+
+Transition lines should be easy to grep independently from regular tracking heartbeat output.
+
+## Synthetic coverage
+
+At minimum test:
+
+1. hover only -> zero DOWN/UP;
+2. one low-H spike -> zero DOWN;
+3. sustained approach through candidate threshold -> exactly one DOWN;
+4. stationary hold -> no repeated DOWN;
+5. lateral motion while held -> remains held;
+6. H rises through release hysteresis -> exactly one UP;
+7. repeated taps -> one DOWN/UP pair per tap;
+8. invalid/stale/UNKNOWN before contact -> zero DOWN;
+9. invalid/stale/identity change while held -> exactly one fail-safe UP;
+10. excessive H/XY jump -> fail closed;
+11. non-finite metric input -> fail closed;
+12. input source A and input source B obey identical contact semantics;
+13. existing Phase 1C, Phase 2A and Phase 2B through 2B.10D regressions remain green;
+14. OS injection remains disabled.
+
+## Physical gate
+
+First smoke should run with default accepted tracking behavior and semantic contact enabled, with no OS injection.
+
+Required real-device sequences:
+
+- hover clearly above table for several seconds: zero touch;
+- hover close to table without touching: zero touch;
+- slow approach to physical surface: exactly one DOWN near contact;
+- hold still on table: no DOWN spam;
+- lift: exactly one UP;
+- at least five repeated taps: one DOWN/UP pair each;
+- drag laterally while touching: one held contact until lift;
+- deliberately leave/re-enter view: no invented DOWN; held contact must fail-safe UP on loss;
+- no-hand scene: zero events.
+
+Physical review must compare event timing to the actual finger/table contact in video and inspect H telemetry. A confident false `TOUCH_DOWN` while visibly hovering is a BLOCKER.
+
+## First physical smoke — FAIL (false-negative)
+
+Real-device video reviewed on 2026-08-23, duration about 114.5 s, using the
+exact-head artifact from implementation commit:
+
+`9490116b8c727a4c7bfca3c9f3adcf3b2d01ed79`
+
+The requested sequence included clear hover, near-surface hover, slow physical
+contact, hold/drag, repeated taps, intentional loss/re-entry and a final no-hand
+interval.
+
+Observed final contact counters:
+
+```text
+DOWN_total = 0
+UP_total   = 0
+OS_INJECTION=DISABLED
+```
+
+Safety side: no false `TOUCH_DOWN` was observed during the high-hover,
+near-hover or no-hand portions.
+
+Sensitivity side: intended physical contacts and repeated taps also produced no
+`TOUCH_DOWN`, so the required physical behavior is absent and the slice cannot
+be accepted or merged yet.
+
+The video telemetry shows valid accepted fingertip samples during attempted
+near-contact/contact periods, but sampled `H` values remain in the **tens of
+millimetres** rather than entering the `candidate_h_mm=6` /
+`contact_down_h_mm=4` window. Representative visible transition/heartbeat
+samples include approximately `H=33.7`, `26.0`, `42–47`, `53–60` mm while the
+finger is being driven toward/at the working surface. Identity also drops to
+invalid/UNKNOWN frequently, correctly failing closed.
+
+Interpretation: this is not evidence that the surface frame should be changed,
+and it is not justification to blindly raise the 4/6/8 mm thresholds. The
+accepted Phase 2A surface frame previously measured the bare surface near
+`H=0`; the present mismatch is specifically between the **authoritative
+fingertip sample used by Phase 2C** and the physical finger/table contact point.
+
+### Required next action before retuning
+
+Keep PR #17 Draft and OS injection disabled. Add a focused diagnostic/physical
+characterisation step that records stable H distributions for three explicitly
+labelled physical conditions using the same authoritative fingertip stream:
+
+1. high hover;
+2. near hover without contact;
+3. sustained physical fingertip contact.
+
+The purpose is to determine whether Phase 2C needs a contact-point geometric
+proxy/offset, a different accepted fingertip metric sample, or merely revised
+thresholds. Do not alter K/D/R/T/P/Q or the accepted surface frame to hide the
+offset.
+
+**Physical verdict: FAIL / SAFE FALSE-NEGATIVE.**
+
+## Merge rule
+
+CI alone is insufficient. Keep the PR Draft until the real Touch+ semantic-contact smoke passes.
+
+## Implementation record
+
+Phase 2C.1 is an isolated deterministic state machine in
+`revival/src/contact_state_machine_v2c1.h`. The accepted runtime feeds it only
+the final already-selected `smoothed_tip` plus the current accepted identity.
+The 2B.10D source is copied as A/B telemetry only; Phase 2C.1 never selects or
+recomputes a source.
+
+Focused self-test coverage lives in
+`revival/src/contact_state_machine_v2c1_selftest.cpp` and is wired for x64 and
+Win32 in `revival/phase2b_test/CMakeLists.txt` and
+`.github/workflows/revival-fingertip.yml`. Runtime transitions use the dedicated
+`[CONTACT_TRANSITION]` prefix, and the periodic line uses `[CONTACT] heartbeat`.
+Both include `OS_INJECTION=DISABLED`.
+
+Local pre-commit gates completed on 2026-08-23:
+
+- V8, V9/2B.9C.2, 2B.10A, 2B.10C, 2B.10D and Phase 2C.1 self-tests: PASS x64 and Win32;
+- real Revival Win32 runtime build: PASS;
+- Phase 2A surface regression: PASS;
+- Phase 1C calibration/Q regression for `0101007379`: PASS.
+
+Exact first-smoke launch command from the unpacked CI artifact:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\start-touchplus-phase2b9c.ps1
+```
+
+The accepted A path remains the default. `-EnableHybridPromotion` is optional
+and is not part of the first Phase 2C.1 smoke. No merge or physical PASS may be
+claimed from these synthetic results.

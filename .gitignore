@@ -10,6 +10,7 @@ build/track_plus
 patch.zip
 ipc/
 userdata/
+.touchplus-bench-cache/
 
 
 #XCode

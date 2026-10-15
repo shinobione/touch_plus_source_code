@@ -1,12 +1,14 @@
 #pragma once
 
 #include "fingertip_anatomy_ipc_v9.h"
+#include "forward_match_diagnostic_v2c1d.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <limits>
 #include <string>
 #include <vector>
@@ -22,6 +24,50 @@ namespace touchplus::tracking {
 // frame using a short palm/silhouette history and requires the compensated point
 // to remain a real current distal boundary. No sidecar/model Z enters this class;
 // accepted Touch+ stereo/Q is still the only metric XYZ source.
+
+struct MetricDiagnosticsV9 {
+    bool fusion_published = false;
+    int target_pixel_x = -1;
+    int target_pixel_y = -1;
+    bool nearest_support_found = false;
+    double nearest_support_distance_px = std::numeric_limits<double>::quiet_NaN();
+    double nearest_disparity_px = std::numeric_limits<double>::quiet_NaN();
+    int refined_candidates = 0;
+    int refined_consistent = 0;
+
+    // Phase 2C.1C diagnostic-only accounting for the 7x7 local stereo probes.
+    // These counters classify why probes fail without changing any matcher,
+    // calibration, surface, identity, smoothing or contact acceptance rule.
+    int probe_total = 0;
+    int probe_out_of_bounds = 0;
+    int probe_outside_hand_mask = 0;
+    int probe_forward_match_fail = 0;
+    int probe_reverse_match_fail = 0;
+    int probe_left_right_mismatch = 0;
+    int probe_matcher_other_fail = 0;
+    int probe_q_projection_fail = 0;
+    int probe_surface_h_reject = 0;
+    int probe_surface_roi_reject = 0;
+    int probe_accepted = 0;
+
+    // Phase 2C.1D diagnostic-only split of forward_match_fail. The helper
+    // replays the exact current forward-stage decisions only after the
+    // authoritative forward matcher has already rejected the probe.
+    int probe_forward_patch_oob = 0;
+    int probe_forward_texture_low = 0;
+    int probe_forward_window_empty = 0;
+    int probe_forward_no_candidate = 0;
+    int probe_forward_correlation_low = 0;
+    int probe_forward_uniqueness_fail = 0;
+    int probe_forward_diag_accepted = 0;
+    double forward_reference_variance_max = std::numeric_limits<double>::quiet_NaN();
+    double forward_best_ncc_max = std::numeric_limits<double>::quiet_NaN();
+    double forward_second_ncc_at_best = std::numeric_limits<double>::quiet_NaN();
+    double forward_best_minus_second_at_best = std::numeric_limits<double>::quiet_NaN();
+    double forward_winning_disparity_at_best = std::numeric_limits<double>::quiet_NaN();
+
+    std::string reject_reason = "NOT_RUN";
+};
 
 class FingertipTrackerV9 {
 public:
@@ -55,6 +101,7 @@ public:
         last_anatomy_observation_ = {};
         last_anatomy_decision_ = {};
         last_fusion_ = {};
+        metric_diagnostics_ = {};
         identity_confidence_ = "LOW";
         stereo_confidence_ = "NOT_RUN";
 
@@ -107,6 +154,8 @@ public:
             temporal_identity_.update({});
             exchange_anatomy(left_gray, selected_mask_, false, 30.0);
             reset_metric_if_identity_lost(false, 0);
+            metric_diagnostics_.reject_reason = "NO_PHYSICAL_HAND_SUPPORT";
+            maybe_report_metric_diagnostic();
             last_result_ = out;
             return out;
         }
@@ -133,10 +182,13 @@ public:
         if (!last_fusion_.publish) {
             out.confidence = "LOW";
             reset_metric_if_identity_lost(false, 0);
+            metric_diagnostics_.reject_reason = "FUSION_NOT_PUBLISHED";
+            maybe_report_metric_diagnostic();
             last_result_ = out;
             return out;
         }
 
+        metric_diagnostics_.fusion_published = true;
         out.pixel_x = last_fusion_.pixel_x;
         out.pixel_y = last_fusion_.pixel_y;
         const std::uint64_t active_identity_id = last_fusion_.identity_id;
@@ -144,7 +196,15 @@ public:
 
         const int px = out.pixel_x;
         const int py = out.pixel_y;
-        if (px < 0 || py < 0) { out.confidence = "LOW"; last_result_ = out; return out; }
+        metric_diagnostics_.target_pixel_x = px;
+        metric_diagnostics_.target_pixel_y = py;
+        if (px < 0 || py < 0) {
+            out.confidence = "LOW";
+            metric_diagnostics_.reject_reason = "INVALID_TARGET_PIXEL";
+            maybe_report_metric_diagnostic();
+            last_result_ = out;
+            return out;
+        }
 
         int nearest_d_small = 0;
         int nearest_dist2 = std::numeric_limits<int>::max();
@@ -161,10 +221,20 @@ public:
             }
         }
 
+        if (nearest_d_small > 0 && nearest_dist2 != std::numeric_limits<int>::max()) {
+            metric_diagnostics_.nearest_support_found = true;
+            metric_diagnostics_.nearest_support_distance_px =
+                std::sqrt(static_cast<double>(nearest_dist2)) * touchplus::depth::kDepthScale;
+            metric_diagnostics_.nearest_disparity_px =
+                static_cast<double>(nearest_d_small * touchplus::depth::kDepthScale);
+        }
+
         if (nearest_d_small <= 0 || nearest_dist2 > 44 * 44) {
             stereo_confidence_ = "LOW";
             out.confidence = "LOW";
             ++missing_metric_frames_;
+            metric_diagnostics_.reject_reason = "NO_NEAR_STEREO_SUPPORT";
+            maybe_report_metric_diagnostic();
             last_result_ = out;
             return out;
         }
@@ -177,21 +247,109 @@ public:
         constexpr std::array<int, 7> offsets{{-12, -8, -4, 0, 4, 8, 12}};
         for (const int oy : offsets) {
             for (const int ox : offsets) {
+                ++metric_diagnostics_.probe_total;
                 const int sx = px + ox, sy = py + oy;
-                if (sx < 12 || sx >= touchplus::depth::kEyeWidth - 5 || sy < 5 || sy >= touchplus::depth::kEyeHeight - 5) continue;
+                if (sx < 12 || sx >= touchplus::depth::kEyeWidth - 5 || sy < 5 || sy >= touchplus::depth::kEyeHeight - 5) {
+                    ++metric_diagnostics_.probe_out_of_bounds;
+                    continue;
+                }
                 const int sgx = sx / touchplus::depth::kDepthScale;
                 const int sgy = sy / touchplus::depth::kDepthScale;
-                if (!mask_near_v5(selected_mask_, touchplus::depth::kDepthWidth, touchplus::depth::kDepthHeight, sgx, sgy, 1)) continue;
+                if (!mask_near_v5(selected_mask_, touchplus::depth::kDepthWidth, touchplus::depth::kDepthHeight, sgx, sgy, 1)) {
+                    ++metric_diagnostics_.probe_outside_hand_mask;
+                    continue;
+                }
+
                 const auto match = touchplus::depth::robust_point_detail::mutually_consistent_match(left_gray, right_gray, sx, sy, min_d, max_d);
-                if (!match.valid) continue;
+                if (!match.valid) {
+                    // Classification-only replay of the existing matcher stages.
+                    // The authoritative match above remains untouched.
+                    const auto forward = touchplus::depth::robust_point_detail::search_left_to_right(
+                        left_gray, right_gray, sx, sy, min_d, max_d);
+                    if (!forward.valid) {
+                        ++metric_diagnostics_.probe_forward_match_fail;
+
+                        const auto forward_diag = diagnose_left_to_right_v2c1d(
+                            left_gray, right_gray, sx, sy, min_d, max_d);
+                        if (std::isfinite(forward_diag.reference_variance) &&
+                            (!std::isfinite(metric_diagnostics_.forward_reference_variance_max) ||
+                             forward_diag.reference_variance > metric_diagnostics_.forward_reference_variance_max)) {
+                            metric_diagnostics_.forward_reference_variance_max = forward_diag.reference_variance;
+                        }
+                        if (std::isfinite(forward_diag.best_ncc) &&
+                            (!std::isfinite(metric_diagnostics_.forward_best_ncc_max) ||
+                             forward_diag.best_ncc > metric_diagnostics_.forward_best_ncc_max)) {
+                            metric_diagnostics_.forward_best_ncc_max = forward_diag.best_ncc;
+                            metric_diagnostics_.forward_second_ncc_at_best = forward_diag.second_ncc;
+                            metric_diagnostics_.forward_best_minus_second_at_best = forward_diag.best_minus_second;
+                            metric_diagnostics_.forward_winning_disparity_at_best = forward_diag.winning_disparity;
+                        }
+
+                        switch (forward_diag.reason) {
+                        case ForwardFailureReasonV2C1D::Accepted:
+                            ++metric_diagnostics_.probe_forward_diag_accepted;
+                            break;
+                        case ForwardFailureReasonV2C1D::PatchOutOfBounds:
+                            ++metric_diagnostics_.probe_forward_patch_oob;
+                            break;
+                        case ForwardFailureReasonV2C1D::TextureLow:
+                            ++metric_diagnostics_.probe_forward_texture_low;
+                            break;
+                        case ForwardFailureReasonV2C1D::WindowEmpty:
+                            ++metric_diagnostics_.probe_forward_window_empty;
+                            break;
+                        case ForwardFailureReasonV2C1D::NoValidCandidate:
+                            ++metric_diagnostics_.probe_forward_no_candidate;
+                            break;
+                        case ForwardFailureReasonV2C1D::CorrelationLow:
+                            ++metric_diagnostics_.probe_forward_correlation_low;
+                            break;
+                        case ForwardFailureReasonV2C1D::UniquenessFail:
+                            ++metric_diagnostics_.probe_forward_uniqueness_fail;
+                            break;
+                        }
+                    } else {
+                        const int right_x = static_cast<int>(std::lround(sx - forward.disparity));
+                        const int narrow_min = std::max(
+                            touchplus::depth::robust_point_detail::kMinDisparity,
+                            static_cast<int>(std::floor(forward.disparity - 3.0)));
+                        const int narrow_max = std::min(
+                            touchplus::depth::robust_point_detail::kMaxDisparity,
+                            static_cast<int>(std::ceil(forward.disparity + 3.0)));
+                        const auto reverse = touchplus::depth::robust_point_detail::search_right_to_left(
+                            right_gray, left_gray, right_x, sy, narrow_min, narrow_max);
+                        if (!reverse.valid) {
+                            ++metric_diagnostics_.probe_reverse_match_fail;
+                        } else if (std::abs(reverse.disparity - forward.disparity) >
+                                   touchplus::depth::robust_point_detail::kLeftRightTolerancePx) {
+                            ++metric_diagnostics_.probe_left_right_mismatch;
+                        } else {
+                            ++metric_diagnostics_.probe_matcher_other_fail;
+                        }
+                    }
+                    continue;
+                }
+
                 const auto camera = touchplus::surface::camera_point_from_q(calibration, static_cast<double>(sx), static_cast<double>(sy), match.disparity);
-                if (!std::isfinite(camera.x) || !std::isfinite(camera.y) || !std::isfinite(camera.z)) continue;
+                if (!std::isfinite(camera.x) || !std::isfinite(camera.y) || !std::isfinite(camera.z)) {
+                    ++metric_diagnostics_.probe_q_projection_fail;
+                    continue;
+                }
                 const auto sp = touchplus::surface::to_surface(surface, camera);
-                if (!std::isfinite(sp.h_mm) || sp.h_mm < 2.0 || sp.h_mm > kV6MaxSupportHmm + 20.0 || std::abs(sp.x_mm) > roi_half_x || std::abs(sp.y_mm) > roi_half_y) continue;
+                if (!std::isfinite(sp.h_mm) || sp.h_mm < 2.0 || sp.h_mm > kV6MaxSupportHmm + 20.0) {
+                    ++metric_diagnostics_.probe_surface_h_reject;
+                    continue;
+                }
+                if (std::abs(sp.x_mm) > roi_half_x || std::abs(sp.y_mm) > roi_half_y) {
+                    ++metric_diagnostics_.probe_surface_roi_reject;
+                    continue;
+                }
+                ++metric_diagnostics_.probe_accepted;
                 refined.push_back(sp);
             }
         }
 
+        metric_diagnostics_.refined_candidates = static_cast<int>(refined.size());
         if (!refined.empty()) {
             std::vector<double> hs; hs.reserve(refined.size()); for (const auto& p : refined) hs.push_back(p.h_mm);
             const double median_h = touchplus::surface::median(std::move(hs));
@@ -200,11 +358,15 @@ public:
             refined = std::move(consistent);
         }
 
+        metric_diagnostics_.refined_consistent = static_cast<int>(refined.size());
         out.refinement_support = static_cast<int>(refined.size());
         stereo_confidence_ = refined.size() >= 6 ? "HIGH" : refined.size() >= 3 ? "MEDIUM" : "LOW";
         if (!final_identity_stereo_gate_v9(identity_confidence_, stereo_confidence_)) {
             out.confidence = "LOW";
             ++missing_metric_frames_;
+            metric_diagnostics_.reject_reason =
+                stereo_confidence_ == "LOW" ? "REFINED_SUPPORT_TOO_LOW" : "IDENTITY_STEREO_GATE";
+            maybe_report_metric_diagnostic();
             last_result_ = out;
             return out;
         }
@@ -213,7 +375,13 @@ public:
         if (have_smoothed_) {
             const double jump = std::sqrt(sqr(out.raw_tip.x_mm - smoothed_.x_mm) + sqr(out.raw_tip.y_mm - smoothed_.y_mm) + sqr(out.raw_tip.h_mm - smoothed_.h_mm));
             if (jump > 85.0 && missing_metric_frames_ < 3) {
-                stereo_confidence_ = "LOW"; out.confidence = "LOW"; ++missing_metric_frames_; last_result_ = out; return out;
+                stereo_confidence_ = "LOW";
+                out.confidence = "LOW";
+                ++missing_metric_frames_;
+                metric_diagnostics_.reject_reason = "METRIC_JUMP_REJECTED";
+                maybe_report_metric_diagnostic();
+                last_result_ = out;
+                return out;
             }
             constexpr double alpha = 0.32;
             smoothed_.x_mm = smoothed_.x_mm * (1.0 - alpha) + out.raw_tip.x_mm * alpha;
@@ -225,6 +393,8 @@ public:
         out.smoothed_tip = smoothed_;
         out.confidence = identity_confidence_ == "HIGH" && stereo_confidence_ == "HIGH" ? "HIGH" : "MEDIUM";
         out.fingertip_valid = true;
+        metric_diagnostics_.reject_reason = "OK";
+        maybe_report_metric_diagnostic();
         last_result_ = out;
         return out;
     }
@@ -237,12 +407,88 @@ public:
     const AnatomyObservationV9& last_anatomy_observation() const { return last_anatomy_observation_; }
     const AnatomyDecisionV9& last_anatomy_decision() const { return last_anatomy_decision_; }
     const FusedIdentityV9& last_fusion() const { return last_fusion_; }
+    const MetricDiagnosticsV9& metric_diagnostics() const { return metric_diagnostics_; }
     const std::string& identity_confidence() const { return identity_confidence_; }
     const std::string& stereo_confidence() const { return stereo_confidence_; }
     std::uint32_t frame_id() const { return frame_id_; }
     std::uint32_t sidecar_last_error() const { return static_cast<std::uint32_t>(anatomy_bridge_.last_error()); }
 
 private:
+    void maybe_report_metric_diagnostic() const {
+        if ((frame_id_ % 15U) != 0U) return;
+        std::cout << "[METRIC] frame=" << frame_id_
+                  << " fusion=" << (metric_diagnostics_.fusion_published ? "PUBLISHED" : "NO")
+                  << " target=" << metric_diagnostics_.target_pixel_x << ',' << metric_diagnostics_.target_pixel_y
+                  << " nearest_support_px=";
+        if (std::isfinite(metric_diagnostics_.nearest_support_distance_px))
+            std::cout << metric_diagnostics_.nearest_support_distance_px;
+        else
+            std::cout << "nan";
+        std::cout << " nearest_disparity_px=";
+        if (std::isfinite(metric_diagnostics_.nearest_disparity_px))
+            std::cout << metric_diagnostics_.nearest_disparity_px;
+        else
+            std::cout << "nan";
+        std::cout << " refined_candidates=" << metric_diagnostics_.refined_candidates
+                  << " refined_consistent=" << metric_diagnostics_.refined_consistent
+                  << " probes=" << metric_diagnostics_.probe_total
+                  << " oob=" << metric_diagnostics_.probe_out_of_bounds
+                  << " mask=" << metric_diagnostics_.probe_outside_hand_mask
+                  << " fwd_fail=" << metric_diagnostics_.probe_forward_match_fail
+                  << " rev_fail=" << metric_diagnostics_.probe_reverse_match_fail
+                  << " lr_fail=" << metric_diagnostics_.probe_left_right_mismatch
+                  << " matcher_other=" << metric_diagnostics_.probe_matcher_other_fail
+                  << " q_fail=" << metric_diagnostics_.probe_q_projection_fail
+                  << " h_reject=" << metric_diagnostics_.probe_surface_h_reject
+                  << " roi_reject=" << metric_diagnostics_.probe_surface_roi_reject
+                  << " accepted=" << metric_diagnostics_.probe_accepted
+                  << " identity_confidence=" << identity_confidence_
+                  << " stereo_confidence=" << stereo_confidence_
+                  << " reason=" << metric_diagnostics_.reject_reason
+                  << " OS_INJECTION=DISABLED\n";
+
+        if (metric_diagnostics_.probe_forward_match_fail > 0) {
+            std::cout << "[FWD] frame=" << frame_id_
+                      << " patch_oob=" << metric_diagnostics_.probe_forward_patch_oob
+                      << " texture_low=" << metric_diagnostics_.probe_forward_texture_low
+                      << " window_empty=" << metric_diagnostics_.probe_forward_window_empty
+                      << " no_candidate=" << metric_diagnostics_.probe_forward_no_candidate
+                      << " corr_low=" << metric_diagnostics_.probe_forward_correlation_low
+                      << " uniqueness_fail=" << metric_diagnostics_.probe_forward_uniqueness_fail
+                      << " diag_accepted=" << metric_diagnostics_.probe_forward_diag_accepted
+                      << " reference_variance_max=";
+            if (std::isfinite(metric_diagnostics_.forward_reference_variance_max))
+                std::cout << metric_diagnostics_.forward_reference_variance_max;
+            else
+                std::cout << "nan";
+            std::cout << " best_ncc_max=";
+            if (std::isfinite(metric_diagnostics_.forward_best_ncc_max))
+                std::cout << metric_diagnostics_.forward_best_ncc_max;
+            else
+                std::cout << "nan";
+            std::cout << " second_ncc_at_best=";
+            if (std::isfinite(metric_diagnostics_.forward_second_ncc_at_best))
+                std::cout << metric_diagnostics_.forward_second_ncc_at_best;
+            else
+                std::cout << "nan";
+            std::cout << " best_minus_second=";
+            if (std::isfinite(metric_diagnostics_.forward_best_minus_second_at_best))
+                std::cout << metric_diagnostics_.forward_best_minus_second_at_best;
+            else
+                std::cout << "nan";
+            std::cout << " winning_disparity=";
+            if (std::isfinite(metric_diagnostics_.forward_winning_disparity_at_best))
+                std::cout << metric_diagnostics_.forward_winning_disparity_at_best;
+            else
+                std::cout << "nan";
+            std::cout << " thresholds(texture="
+                      << touchplus::depth::robust_point_detail::kMinTextureVariance
+                      << ",corr=" << touchplus::depth::robust_point_detail::kMinCorrelation
+                      << ",gap=" << touchplus::depth::robust_point_detail::kMinCorrelationGap
+                      << ") OS_INJECTION=DISABLED\n";
+        }
+    }
+
     void remember_sync_snapshot(const AnatomyFrameSyncSnapshotV9& snapshot) {
         sync_history_.push_back(snapshot);
         while (sync_history_.size() > 6) sync_history_.erase(sync_history_.begin());
@@ -267,7 +513,7 @@ private:
         if (metric_identity_id_ != identity_id) { have_smoothed_ = false; missing_metric_frames_ = 0; smoothed_ = {}; metric_identity_id_ = identity_id; }
     }
     void clear_tracking_only() {
-        selected_mask_.clear(); sync_history_.clear(); last_result_ = {}; last_identity_ = {}; last_decision_ = {}; last_anatomy_observation_ = {}; last_anatomy_decision_ = {}; last_fusion_ = {};
+        selected_mask_.clear(); sync_history_.clear(); last_result_ = {}; last_identity_ = {}; last_decision_ = {}; last_anatomy_observation_ = {}; last_anatomy_decision_ = {}; last_fusion_ = {}; metric_diagnostics_ = {};
         temporal_identity_.clear(); anatomy_gate_.clear(); identity_confidence_ = "LOW"; stereo_confidence_ = "NOT_RUN"; have_smoothed_ = false; missing_metric_frames_ = 0; metric_identity_id_ = 0; smoothed_ = {};
     }
 
@@ -281,6 +527,7 @@ private:
     AnatomyObservationV9 last_anatomy_observation_{};
     AnatomyDecisionV9 last_anatomy_decision_{};
     FusedIdentityV9 last_fusion_{};
+    MetricDiagnosticsV9 metric_diagnostics_{};
     std::vector<uint8_t> selected_mask_;
     std::vector<AnatomyFrameSyncSnapshotV9> sync_history_;
     std::string identity_confidence_ = "LOW", stereo_confidence_ = "NOT_RUN";
