@@ -5,7 +5,7 @@
 Evidence-only research note for PR #17 (`revival/phase2c1-contact-semantics`).
 No runtime or threshold change, no calibration update, no merger or OS injection.
 Initial PR #17 physical smoke: **FAIL / safe false-negative** (0 DOWN, 0 UP).
-The subsequent labelled H/CSV diagnostic exists in PR #17 but has no physical PASS verdict.
+Subsequent 2C.1A–2C.1I smokes have already tested labelled H/raw-dense/shadow contact diagnostics. The 2C.1I CSV proved that trusted FUSED/ANATOMY fingertip targeting disappeared at contact. The current live frontier is 2C.1J.1, not initial H characterization.
 Branch head inspected before this note: `2cb21738398b0f81d753792297a580650b3ce508`.
 This note itself does **not** claim any new BUILD, CI or PHYSICAL PASS.
 
@@ -67,10 +67,14 @@ Implement concepts independently if required; preserve provenance.
 
 ## What this means for the current failure
 
-PR #17's documented first real smoke saw authoritative fingertip H often in
-the tens of mm during physically attempted contact, while empty/hover was safe.
-That does NOT imply the accepted table-plane model or Q is incorrect.
-Two hypotheses need discrimination:
+PR #17's first physical smoke saw authoritative H in the tens of mm during
+attempted contact while empty/hover was safe. Later 2C.1G.1/H/I work showed
+raw-dense CONTACT H bands and rejected contaminated minima, but 2C.1I's
+labelled replay **could not evaluate contact**: trusted FUSED/ANATOMY target
+counts were 0/0; 93 of 1128 rows had valid raw-dense samples, all
+GEOMETRY_ONLY, and the geometry pixel was visibly the wrong branch at
+contact. This does NOT implicate the surface model or Q.
+Two mechanisms remain to discriminate:
 
 - **Contact-point geometry / representation:** the reliably measured anatomical
   pixel may sit above/behind the actual pad/table contact location. A local
@@ -84,12 +88,48 @@ stereo/identity loss and tried an occlusion bridge. It is an *experimental,
 unmerged, different baseline*, not permission to cherry-pick that bridge or
 reinterpret the PR #17 evidence.
 
+## Latest exact-head physical gate: 2C.1J.1 (priority before any REA binary work)
+
+At implementation head `2cb21738398b0f81d753792297a580650b3ce508`,
+2C.1J introduced separate shadow-anatomy IPC to probe real LEFT anatomy
+even when accepted hand_valid=0 and anatomy=UNAVAILABLE. Its first
+physical launch produced strong viewer tearing / capture falling to ~17–23 fps.
+The accepted single-sidecar launcher restored clean ~30 fps. 2C.1J.1 narrows
+shadow probes to one in six frames (~5 Hz), only when accepted hand is
+invalid and accepted anatomy UNAVAILABLE, bounds mask size and caps OpenCV
+to one thread. CI of that implementation SHA was green, **but no post-fix
+physical 2C.1J.1 PASS was found in the PR record**.
+
+Required immediate smoke:
+1. Download the exact-head `touchplus-phase2c1j-shadow-anatomy-windows`
+   artifact ID `9569827500` from GitHub Actions; preserve the user's
+   existing `surface/0101007379.json` and local calibration/recording assets.
+   Do not reuse a historical `sandbox:/` link.
+2. With a genuinely empty scene press B, wait for background READY, confirm
+   stable LEFT/RIGHT and capture/source near the accepted ~30 fps baseline.
+   If tearing/low rate persists, stop and classify **PHYSICAL FAIL**; do not
+   use shadow anatomy as contact evidence.
+3. Label HIGH / NEAR / CONTACT / NONE in the shadow kit (1 / 2 / 3 / 0),
+   keep a clearly extended index visible, and inspect scheduled
+   `[ANATOMY_SHADOW] probe=RUN` where `accepted_hand=0`.
+4. Evaluate whether `shadow_status=GUIDED_DISTAL` lands on the **visible
+   real distal index** in contact frames, as opposed to a proximal or wrong
+   branch. The shadow stream is not an accepted result even if this succeeds.
+5. Record original artifact SHA, scene, sample counts, false anatomical points,
+   valid probes, performance, CSV and physical verdict in the PR; no footage
+   in public GitHub. If the result is positive, plan a new gated adapter
+   rather than changing 2B authority in this smoke.
+
+Upstream REA can later help only if a *specific opaque native-binary question*
+remains unanswered by `master` source and current diagnostic logs.
+
 ## Proposed next reversible experiment — no runtime code change yet
 
-A. First recover **existing local** labelled H-characterisation CSV / video
-   corresponding to PR #17's diagnostic H/N/C/0 (do not recapture if sound data
-   already exists). Keep raw frames/CSV private; publish only derived aggregate
-   statistics if authorized.
+A. Prefer the already reviewed 2C.1I labels/CSV summary, and first complete
+   2C.1J.1 physical anatomy gate above. The 2C.1I dataset alone is **not
+   eligible** for a contact-offset fit because no FUSED/ANATOMY targets existed.
+   Keep raw frames/CSV private; publish only derived aggregate statistics if
+   authorized.
 B. Create an offline, read-only table by operator label HIGH/NEAR/CONTACT/NONE:
    accepted/invalid frame counts and reasons; raw/smoothed H distribution
    (n, median, p05/p95), XY regions; identity/source and timestamp continuity.
@@ -129,6 +169,6 @@ D. Only if labelled data supports a reproducible separation, add a
 
 **Evidence-backed path found; not a contact fix.** The Ractiv
 location-dependent interaction adjustment is a plausible design insight.
-Prioritize analysis of PR #17's already-labelled real-device data, not new
-tuning/bootstrapping or fresh invasive REA installation. No user PC action,
+Prioritize the pending 2C.1J.1 physical retest, not retuning from the
+already shown non-evaluable 2C.1I labels or a fresh REA installation. No user PC action,
 git pull, or Codex quota is needed just to record this finding.
