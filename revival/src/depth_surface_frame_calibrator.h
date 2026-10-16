@@ -6,5 +6,6 @@
 //
 // This target deliberately excludes all tracking, anatomy, hybrid promotion
 // and contact/OS output modules.
+#include "depth_probe_lock.h"
 #include "surface_frame_robust.h"
 #include "depth_surface_frame.h"
