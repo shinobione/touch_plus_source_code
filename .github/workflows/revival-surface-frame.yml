@@ -59,6 +59,14 @@ jobs:
           & $exe --self-test $cal
           if ($LASTEXITCODE -ne 0) { throw "Phase 1C depth self-test regressed: $LASTEXITCODE" }
 
+      - name: Validate surface-only runtime and calibration/Q
+        shell: pwsh
+        run: |
+          $exe = "build/surface-x86/Release/touchplus_surface_calibrator.exe"
+          if (-not (Test-Path $exe)) { throw "Surface-only EXE missing" }
+          & $exe --self-test "revival/calibration/candidates/0101007379.json"
+          if ($LASTEXITCODE -ne 0) { throw "Surface-only calibration/Q self-test FAILED" }
+
       - name: Prepare Phase 2A surface-frame kit
         shell: pwsh
         run: |
@@ -67,6 +75,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $kit | Out-Null
           New-Item -ItemType Directory -Force -Path "$kit/calibration" | Out-Null
           Copy-Item "$src/touchplus_depth_viewer.exe" "$kit/touchplus_depth_viewer.exe"
+          Copy-Item "$src/touchplus_surface_calibrator.exe" "$kit/touchplus_surface_calibrator.exe"
           Copy-Item "$src/eSPAEAWBCtrl.dll" "$kit/eSPAEAWBCtrl.dll"
           Copy-Item "$src/eSPDI.dll" "$kit/eSPDI.dll"
           Copy-Item "$src/EtLib.dll" "$kit/EtLib.dll"

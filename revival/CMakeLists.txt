@@ -173,6 +173,46 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         "${ETRON_DIR}/eSPAEAWBCtrl.lib"
     )
 
+    # Dedicated Phase 2A-only hardware viewer: no fingertip/contact runtime.
+    # Prevents H/C hotkey collisions with later experimental Phase 2C.
+    add_executable(touchplus_surface_calibrator
+        src/depth_viewer.cpp
+        src/depth_surface_frame.h
+        src/depth_surface_frame_calibrator.h
+        src/surface_frame_robust.h
+        src/surface_frame_math.h
+        src/depth_point_robust.h
+    )
+    list(APPEND REVIVAL_TARGETS touchplus_surface_calibrator)
+    target_compile_features(touchplus_surface_calibrator PRIVATE cxx_std_20)
+    target_compile_definitions(touchplus_surface_calibrator PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+        TOUCHPLUS_SURFACE_ONLY
+    )
+    target_include_directories(touchplus_surface_calibrator PRIVATE
+        "${ETRON_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    # Preserve the accepted Phase 1C/2A/2B composite runtime, then layer the
+    # Phase 2B.10D authoritative selector behind explicit runtime opt-in. Its
+    # absence leaves the accepted A result and smoothing path unchanged.
+    if(MSVC)
+        target_compile_options(touchplus_surface_calibrator PRIVATE
+            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_surface_frame_calibrator.h"
+        )
+    endif()
+    target_link_libraries(touchplus_surface_calibrator PRIVATE
+        mf
+        mfplat
+        mfreadwrite
+        mfuuid
+        ole32
+        gdi32
+        user32
+        "${ETRON_DIR}/eSPDI.lib"
+        "${ETRON_DIR}/eSPAEAWBCtrl.lib"
+    )
+
     # Raw timing probe: no decode, no color conversion, no GDI. This isolates
     # the actual native MJPEG sample cadence delivered by the Touch+ driver.
     add_executable(touchplus_timing_probe
@@ -248,6 +288,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
             touchplus_stereo_viewer
             touchplus_calibration_capture
             touchplus_depth_viewer
+            touchplus_surface_calibrator
             touchplus_timing_probe
             touchplus_directshow_timing_probe
             touchplus_directshow_legacy_timing_probe)

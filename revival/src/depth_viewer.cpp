@@ -616,8 +616,14 @@ void capture_thread(HWND hwnd, Calibration calibration, RectifyMap map_left, Rec
 
             const int cursor_x = std::clamp(g_cursor_x.load(), 0, static_cast<int>(kEyeWidth) - 1);
             const int cursor_y = std::clamp(g_cursor_y.load(), 0, static_cast<int>(kEyeHeight) - 1);
+#ifdef TOUCHPLUS_SURFACE_ONLY
+            // Isolated Phase 2A capture: no tracker, no contact shortcuts.
+            const PointDepth cursor_depth = touchplus::surface::point_depth_surface_wrapper(
+                calibration, rect_left_gray, rect_right_gray, cursor_x, cursor_y);
+#else
             const PointDepth cursor_depth = touchplus::depth::point_depth(
                 calibration, rect_left_gray, rect_right_gray, cursor_x, cursor_y);
+#endif
 
             if (depth_mode) {
                 touchplus::depth::compose_stereo_or_depth(
@@ -916,16 +922,26 @@ int wmain(int argc, wchar_t** argv) {
         }
     }
 
+#ifndef TOUCHPLUS_SURFACE_ONLY
     touchplus::depth::set_hybrid_promotion_enabled_v10d(
         enable_hybrid_promotion);
+#else
+    (void)enable_hybrid_promotion;
+#endif
 
     try {
+#ifdef TOUCHPLUS_SURFACE_ONLY
+        std::cout << "[SURFACE_ONLY] Phase 2A dedicated calibration runtime"
+                  << " | no tracking, no anatomy, no contact, no OS injection"
+                  << " | C=sample F=fit H=height R=reset U=undo\n";
+#else
         std::cout
             << "[HYBRID] promotion_mode="
             << (touchplus::depth::hybrid_promotion_enabled_v10d()
                     ? "ENABLED" : "DISABLED")
             << " | opt_in_flag=--enable-hybrid-promotion"
             << " | OS_INJECTION=DISABLED\n";
+#endif
         if (self_test) {
             if (self_test_calibration.empty()) {
                 throw std::runtime_error("--self-test requires a calibration JSON path");
