@@ -916,16 +916,26 @@ int wmain(int argc, wchar_t** argv) {
         }
     }
 
+#ifndef TOUCHPLUS_SURFACE_ONLY
     touchplus::depth::set_hybrid_promotion_enabled_v10d(
         enable_hybrid_promotion);
+#else
+    (void)enable_hybrid_promotion;
+#endif
 
     try {
+#ifdef TOUCHPLUS_SURFACE_ONLY
+        std::cout << "[SURFACE_ONLY] Phase 2A dedicated calibration runtime"
+                  << " | no tracking, no anatomy, no contact, no OS injection"
+                  << " | C=sample F=fit H=height R=reset U=undo\n";
+#else
         std::cout
             << "[HYBRID] promotion_mode="
             << (touchplus::depth::hybrid_promotion_enabled_v10d()
                     ? "ENABLED" : "DISABLED")
             << " | opt_in_flag=--enable-hybrid-promotion"
             << " | OS_INJECTION=DISABLED\n";
+#endif
         if (self_test) {
             if (self_test_calibration.empty()) {
                 throw std::runtime_error("--self-test requires a calibration JSON path");
