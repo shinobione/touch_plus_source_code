@@ -178,6 +178,8 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     add_executable(touchplus_surface_calibrator
         src/depth_viewer.cpp
         src/depth_surface_frame.h
+        src/depth_surface_frame_calibrator.h
+        src/surface_frame_robust.h
         src/surface_frame_math.h
         src/depth_point_robust.h
     )
@@ -196,7 +198,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     # absence leaves the accepted A result and smoothing path unchanged.
     if(MSVC)
         target_compile_options(touchplus_surface_calibrator PRIVATE
-            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_surface_frame.h"
+            "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/depth_surface_frame_calibrator.h"
         )
     endif()
     target_link_libraries(touchplus_surface_calibrator PRIVATE
